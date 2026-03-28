@@ -495,7 +495,7 @@ function App() {
 
     const requestPromise = (async () => {
       try {
-        const res = await fetch(`http://localhost:3001/api/players/${safePlayerId}/fantasy-points?season=${seasonKey}`);
+        const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${safePlayerId}/fantasy-points?season=${seasonKey}`);
         if (!res.ok) throw new Error('failed');
 
         const data = await res.json();
@@ -683,7 +683,7 @@ function App() {
       if (Object.prototype.hasOwnProperty.call(officialStatsCache, cacheKey)) return;
 
       try {
-        const res = await fetch(`http://localhost:3001/api/players/${selectedPlayer._id}/official-stats?season=${selectedSeason}`);
+        const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${selectedPlayer._id}/official-stats?season=${selectedSeason}`);
         if (!res.ok) {
           setOfficialStatsCache((prev) => ({ ...prev, [cacheKey]: null }));
           return;
@@ -741,7 +741,7 @@ function App() {
   const fetchMyTeam = useCallback(async () => {
     if (!auth?.token) return;
     try {
-      const res = await fetch('http://localhost:3001/api/drafts/my-team', {
+      const res = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/my-team', {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
       if (res.ok) {
@@ -759,7 +759,7 @@ function App() {
     setMyTeamGroupsLoading(true);
     setMyTeamSelectionMessage('');
     try {
-      const res = await fetch('http://localhost:3001/api/groups', {
+      const res = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/groups', {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
       const data = await res.json();
@@ -792,7 +792,7 @@ function App() {
 
     setMyTeamSelectionMessage('');
     try {
-      const res = await fetch(`http://localhost:3001/api/groups/${groupId}/teams`, {
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/groups/${groupId}/teams`, {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
       const data = await res.json();
@@ -853,7 +853,7 @@ function App() {
 
     setPickupLoadingPlayerId(player._id);
     try {
-      const res = await fetch('http://localhost:3001/api/drafts/my-team/pickup', {
+      const res = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/my-team/pickup', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -889,7 +889,7 @@ function App() {
     if (!confirmed) return;
 
     try {
-      const res = await fetch(`http://localhost:3001/api/drafts/my-team/${player._id}`, {
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/my-team/${player._id}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${auth.token}` }
       });
@@ -920,7 +920,7 @@ function App() {
     if (!auth?.token || !selectedMyTeamGroupId) return;
     setSwapLoading(true);
     try {
-      const res = await fetch('http://localhost:3001/api/drafts/roster/swap', {
+      const res = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/roster/swap', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -950,7 +950,7 @@ function App() {
 
     setTeamNameSaving(true);
     try {
-      const res = await fetch(`http://localhost:3001/api/groups/${selectedMyTeamGroupId}/team-name`, {
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/groups/${selectedMyTeamGroupId}/team-name`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -982,7 +982,7 @@ function App() {
     setStandingsError('');
     try {
       const query = selectedMyTeamGroupId ? `?groupId=${encodeURIComponent(selectedMyTeamGroupId)}` : '';
-      const res = await fetch(`http://localhost:3001/api/drafts/standings${query}`);
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/standings${query}`);
       if (!res.ok) throw new Error('Failed to load standings');
       const data = await res.json();
       setStandings(Array.isArray(data?.standings) ? data.standings : []);
@@ -1003,7 +1003,7 @@ function App() {
     setStandingsTeamsLoading(true);
     setStandingsTeamsError('');
     try {
-      const res = await fetch(`http://localhost:3001/api/groups/${selectedMyTeamGroupId}/teams`, {
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/groups/${selectedMyTeamGroupId}/teams`, {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
       const data = await res.json();
@@ -1062,7 +1062,7 @@ function App() {
     setTradeLoading(true);
     setTradeError('');
     try {
-      const res = await fetch(`http://localhost:3001/api/trades/teams?groupId=${encodeURIComponent(selectedMyTeamGroupId)}`, {
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/trades/teams?groupId=${encodeURIComponent(selectedMyTeamGroupId)}`, {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
       if (!res.ok) throw new Error('Failed to load teams for trades');
@@ -1087,7 +1087,7 @@ function App() {
     setInboxError('');
     try {
       const query = selectedMyTeamGroupId ? `?groupId=${encodeURIComponent(selectedMyTeamGroupId)}` : '';
-      const res = await fetch(`http://localhost:3001/api/trades/inbox${query}`, {
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/trades/inbox${query}`, {
         headers: { Authorization: `Bearer ${auth.token}` }
       });
       if (!res.ok) throw new Error('Failed to load inbox');
@@ -1110,7 +1110,7 @@ function App() {
 
     try {
       const query = selectedMyTeamGroupId ? `?groupId=${encodeURIComponent(selectedMyTeamGroupId)}` : '';
-      const res = await fetch(`http://localhost:3001/api/trades/inbox/read${query}`, {
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/trades/inbox/read${query}`, {
         method: 'POST',
         headers: { Authorization: `Bearer ${auth.token}` }
       });
@@ -1310,7 +1310,7 @@ function App() {
       if (pendingTargets.size > 0) {
         await Promise.all([...pendingTargets.values()].map(async (target) => {
           try {
-            const res = await fetch(`http://localhost:3001/api/players/${target.playerId}/fantasy-points?season=${target.season}`);
+            const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${target.playerId}/fantasy-points?season=${target.season}`);
             if (!res.ok) throw new Error('failed');
             const data = await res.json();
             const points = Number(data?.totals?.fantasyPoints);
@@ -1515,7 +1515,7 @@ function App() {
 
       await Promise.all(pendingTargets.map(async (target) => {
         try {
-          const res = await fetch(`http://localhost:3001/api/players/${target.playerId}/fantasy-points?season=${target.season}`);
+          const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${target.playerId}/fantasy-points?season=${target.season}`);
           if (!res.ok) throw new Error('failed');
 
           const data = await res.json();
@@ -1556,7 +1556,7 @@ function App() {
 
       await Promise.all(pendingTargets.map(async (target) => {
         try {
-          const res = await fetch(`http://localhost:3001/api/players/${target.playerId}/fantasy-points?season=${target.season}&startDate=${target.startDate}&endDate=${target.endDate}`);
+          const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${target.playerId}/fantasy-points?season=${target.season}&startDate=${target.startDate}&endDate=${target.endDate}`);
           if (!res.ok) throw new Error('failed');
 
           const data = await res.json();
@@ -1597,7 +1597,7 @@ function App() {
 
       await Promise.all(pendingTargets.map(async (target) => {
         try {
-          const res = await fetch(`http://localhost:3001/api/players/${target.playerId}/fantasy-points?season=${target.season}`);
+          const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${target.playerId}/fantasy-points?season=${target.season}`);
           if (!res.ok) throw new Error('failed');
 
           const data = await res.json();
@@ -1637,7 +1637,7 @@ function App() {
 
       await Promise.all(pendingTargets.map(async (target) => {
         try {
-          const res = await fetch(`http://localhost:3001/api/players/${target.playerId}/fantasy-points?season=${target.season}`);
+          const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${target.playerId}/fantasy-points?season=${target.season}`);
           if (!res.ok) throw new Error('failed');
 
           const data = await res.json();
@@ -1742,7 +1742,7 @@ function App() {
 
     setTradeSubmitMessage('Sending trade offer...');
     try {
-      const res = await fetch('http://localhost:3001/api/trades/offers', {
+      const res = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/trades/offers', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1777,7 +1777,7 @@ function App() {
     if (!auth?.token) return;
 
     try {
-      const res = await fetch(`http://localhost:3001/api/trades/${tradeId}/respond`, {
+      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/trades/${tradeId}/respond`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1806,7 +1806,7 @@ function App() {
     const checkBackend = async () => {
       try {
         console.log('[DEBUG] Checking backend health...');
-        const healthResponse = await fetch('http://localhost:3001/api/health');
+        const healthResponse = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/health');
         console.log('[DEBUG] Health check response:', healthResponse);
         
         if (healthResponse.ok) {
@@ -1828,10 +1828,10 @@ function App() {
     // Then fetch players
     const fetchPlayers = async () => {
       try {
-        console.log('[DEBUG] Fetching players from http://localhost:3001/api/players');
+        console.log('[DEBUG] Fetching players from http://https://fantasy-baseball-o8ta.onrender.com/api/players');
         setLoading(true);
         
-        const response = await fetch('http://localhost:3001/api/players');
+        const response = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/players');
         console.log('[DEBUG] Fetch response status:', response.status);
         console.log('[DEBUG] Fetch response ok:', response.ok);
         console.log('[DEBUG] Response type:', response.type);
