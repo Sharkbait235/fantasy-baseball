@@ -403,7 +403,7 @@ function Draft({ auth, players = [] }) {
     const fetchGroups = async () => {
       try {
         setLoadingGroups(true);
-        const response = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/groups', {
+        const response = await fetch('https://fantasy-baseball-o8ta.onrender.com/api/groups', {
           headers: { Authorization: `Bearer ${auth.token}` }
         });
 
@@ -474,7 +474,7 @@ function Draft({ auth, players = [] }) {
       setCreatingGroup(true);
       setGroupStatusMessage('');
 
-      const response = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/groups', {
+      const response = await fetch('https://fantasy-baseball-o8ta.onrender.com/api/groups', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -511,7 +511,7 @@ function Draft({ auth, players = [] }) {
       setSavingDraftSchedule(true);
       setGroupStatusMessage('');
 
-      const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/groups/${selectedGroup._id}/draft-schedule`, {
+      const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/groups/${selectedGroup._id}/draft-schedule`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -548,7 +548,7 @@ function Draft({ auth, players = [] }) {
       setJoiningGroup(true);
       setGroupStatusMessage('');
 
-      const response = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/groups/join', {
+      const response = await fetch('https://fantasy-baseball-o8ta.onrender.com/api/groups/join', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -590,7 +590,7 @@ function Draft({ auth, players = [] }) {
       setSavingGroupName(true);
       setGroupStatusMessage('');
 
-      const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/groups/${selectedGroup._id}`, {
+      const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/groups/${selectedGroup._id}`, {
         method: 'PUT',
         headers: {
           'Content-Type': 'application/json',
@@ -624,7 +624,7 @@ function Draft({ auth, players = [] }) {
       setDeletingGroupId(selectedGroup._id);
       setGroupStatusMessage('');
 
-      const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/groups/${targetGroupId}`, {
+      const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/groups/${targetGroupId}`, {
         method: 'DELETE',
         headers: {
           Authorization: `Bearer ${auth.token}`
@@ -655,7 +655,7 @@ function Draft({ auth, players = [] }) {
     try {
       if (!silent) setLoadingActiveDraft(true);
 
-      const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/${draftId}`);
+      const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/drafts/${draftId}`);
       const data = await response.json();
       if (!response.ok) throw new Error(data?.message || 'Failed to load draft');
       setActiveDraft(data);
@@ -708,7 +708,7 @@ function Draft({ auth, players = [] }) {
 
     try {
       setStartingDraft(true);
-      const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/${activeDraftId}/start`, { method: 'POST' });
+      const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/drafts/${activeDraftId}/start`, { method: 'POST' });
       const data = await response.json();
       if (!response.ok) throw new Error(data?.message || 'Failed to start draft');
 
@@ -728,7 +728,7 @@ function Draft({ auth, players = [] }) {
 
     try {
       setEndingDraft(true);
-      const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/${activeDraftId}/end`, {
+      const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/drafts/${activeDraftId}/end`, {
         method: 'POST',
         headers: {
           Authorization: `Bearer ${auth.token}`
@@ -751,7 +751,7 @@ function Draft({ auth, players = [] }) {
 
     try {
       setPickingPlayerId(String(player._id));
-      const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/${activeDraftId}/pick`, {
+      const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/drafts/${activeDraftId}/pick`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ playerId: String(player._id), playerName: player.name })
@@ -778,7 +778,7 @@ function Draft({ auth, players = [] }) {
       setJoiningDraftId(selectedGroup._id);
       setGroupStatusMessage('');
 
-      const response = await fetch('http://https://fantasy-baseball-o8ta.onrender.com/api/drafts/from-group', {
+      const response = await fetch('https://fantasy-baseball-o8ta.onrender.com/api/drafts/from-group', {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1195,7 +1195,7 @@ function Draft({ auth, players = [] }) {
     }
     
     try {
-      const res = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${playerId}/official-stats?season=${season}`);
+      const res = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/players/${playerId}/official-stats?season=${season}`);
       if (!res.ok) {
         setDraftPlayerStatsCache((prev) => ({
           ...prev,
@@ -1240,7 +1240,7 @@ function Draft({ auth, players = [] }) {
 
     const requestPromise = (async () => {
       try {
-        const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${safePlayerId}/fantasy-points?season=${seasonKey}`);
+        const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/players/${safePlayerId}/fantasy-points?season=${seasonKey}`);
         if (!response.ok) throw new Error('Failed to load fantasy points');
 
         const data = await response.json();
@@ -1295,7 +1295,7 @@ function Draft({ auth, players = [] }) {
 
     const requestPromise = (async () => {
       try {
-        const response = await fetch(`http://https://fantasy-baseball-o8ta.onrender.com/api/players/${safePlayerId}/fantasy-points?season=2025`);
+        const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/players/${safePlayerId}/fantasy-points?season=2025`);
         if (!response.ok) throw new Error('Failed to load 2025 fantasy points');
 
         const data = await response.json();
