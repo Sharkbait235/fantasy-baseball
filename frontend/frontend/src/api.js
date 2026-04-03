@@ -6,7 +6,7 @@ function getLocalApiBase() {
   }
 
   const hostname = window.location.hostname || 'localhost';
-  return `http://${hostname}:3001/api`;
+  return `http://${hostname}/api`;
 }
 
 function rewriteApiUrl(url) {
