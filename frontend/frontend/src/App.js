@@ -513,7 +513,7 @@ function App() {
 
     const cacheKey = `${safePlayerId}-${seasonKey}`;
     const cached = fantasyPointsCache[cacheKey];
-    if (cached !== undefined) return cached;
+    if (cached !== undefined && cached !== null) return cached;
 
     const inFlight = fantasyPointsInFlightRef.current.get(cacheKey);
     if (inFlight) return inFlight;
