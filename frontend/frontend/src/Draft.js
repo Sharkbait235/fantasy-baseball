@@ -56,6 +56,10 @@ function Draft({ auth, players = [] }) {
   const [isEditingDraftSchedule, setIsEditingDraftSchedule] = useState(false);
   const [editingDraftDateTime, setEditingDraftDateTime] = useState('');
   const [savingDraftSchedule, setSavingDraftSchedule] = useState(false);
+  const [isEditingDraftOrder, setIsEditingDraftOrder] = useState(false);
+  const [draftOrderUserIds, setDraftOrderUserIds] = useState([]);
+  const [isGroupInfoOpen, setIsGroupInfoOpen] = useState(false);
+  const [savingDraftOrder, setSavingDraftOrder] = useState(false);
   const [deletingGroupId, setDeletingGroupId] = useState('');
   const [activeDraftId, setActiveDraftId] = useState('');
   const [activeDraftGroupId, setActiveDraftGroupId] = useState('');
@@ -228,6 +232,23 @@ function Draft({ auth, players = [] }) {
     if (words.length === 1) return words[0].slice(0, 2).toUpperCase();
     return `${words[0][0]}${words[1][0]}`.toUpperCase();
   };
+
+  const buildDraftOrderIdsForGroup = useCallback((group) => {
+    const members = Array.isArray(group?.members) ? group.members : [];
+    const fallback = members.map((member) => String(member?.userId || '')).filter(Boolean);
+    const configured = Array.isArray(group?.draftOrderUserIds)
+      ? group.draftOrderUserIds.map((id) => String(id || '')).filter(Boolean)
+      : [];
+
+    if (configured.length !== fallback.length) return fallback;
+
+    const fallbackSet = new Set(fallback);
+    const configuredSet = new Set(configured);
+    if (configuredSet.size !== fallback.length) return fallback;
+
+    const isSameMembers = configured.every((id) => fallbackSet.has(id));
+    return isSameMembers ? configured : fallback;
+  }, []);
 
   const getTrackedStatsForPlayer = (player) => {
     const isPitcher = (player?.position || '').toUpperCase() === 'P';
@@ -465,7 +486,16 @@ function Draft({ auth, players = [] }) {
     setEditingGroupName(selectedGroup?.name || '');
     setIsEditingDraftSchedule(false);
     setEditingDraftDateTime(toDateTimeInputValue(selectedGroup?.draftScheduledAt));
+    setIsEditingDraftOrder(false);
+    setIsGroupInfoOpen(false);
+    setDraftOrderUserIds(buildDraftOrderIdsForGroup(selectedGroup));
   }, [selectedGroup?._id, selectedGroup?.name, selectedGroup?.draftScheduledAt]);
+
+  useEffect(() => {
+    if (!selectedGroup) return;
+    if (isEditingDraftOrder) return;
+    setDraftOrderUserIds(buildDraftOrderIdsForGroup(selectedGroup));
+  }, [selectedGroup, isEditingDraftOrder, buildDraftOrderIdsForGroup]);
 
   const handleCreateGroup = async () => {
     if (!auth?.token || !groupName.trim()) return;
@@ -646,6 +676,55 @@ function Draft({ auth, players = [] }) {
       setGroupStatusMessage(err.message || 'Failed to delete group');
     } finally {
       setDeletingGroupId('');
+    }
+  };
+
+  const moveDraftOrderMember = (fromIndex, toIndex) => {
+    setDraftOrderUserIds((currentOrder) => {
+      if (fromIndex < 0 || toIndex < 0 || fromIndex >= currentOrder.length || toIndex >= currentOrder.length) {
+        return currentOrder;
+      }
+      const nextOrder = [...currentOrder];
+      const [moved] = nextOrder.splice(fromIndex, 1);
+      nextOrder.splice(toIndex, 0, moved);
+      return nextOrder;
+    });
+  };
+
+  const handleSaveDraftOrder = async () => {
+    if (!auth?.token || !selectedGroup || !isSelectedGroupOwner) return;
+
+    const members = Array.isArray(selectedGroup.members) ? selectedGroup.members : [];
+    if (draftOrderUserIds.length !== members.length) {
+      setGroupStatusMessage('Draft order must include all group members.');
+      return;
+    }
+
+    try {
+      setSavingDraftOrder(true);
+      setGroupStatusMessage('');
+
+      const response = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/groups/${selectedGroup._id}/draft-order`, {
+        method: 'PUT',
+        headers: {
+          'Content-Type': 'application/json',
+          Authorization: `Bearer ${auth.token}`
+        },
+        body: JSON.stringify({ draftOrderUserIds })
+      });
+
+      const data = await response.json();
+      if (!response.ok) throw new Error(data?.message || 'Failed to update draft order');
+
+      setGroups((previousGroups) => previousGroups.map((group) => (
+        group._id === data._id ? data : group
+      )));
+      setIsEditingDraftOrder(false);
+      setGroupStatusMessage('Draft order updated.');
+    } catch (err) {
+      setGroupStatusMessage(err.message || 'Failed to update draft order');
+    } finally {
+      setSavingDraftOrder(false);
     }
   };
 
@@ -1431,7 +1510,7 @@ function Draft({ auth, players = [] }) {
             {activeDraft?.status === 'setup' && (
               <button
                 type="button"
-                className="draft-button groups-create-trigger"
+                className="draft-button groups-create-trigger groups-start-draft-trigger"
                 onClick={handleStartDraft}
                 disabled={startingDraft || !isOwner}
                 title={isOwner ? '' : 'Only the group owner can start the draft'}
@@ -1930,6 +2009,10 @@ function Draft({ auth, players = [] }) {
                   : (ownerMember?.username || 'Group owner');
                 const draftIsScheduled = Boolean(selectedGroup.draftScheduledAt);
                 const draftDisplay = toDisplayDateParts(selectedGroup.draftScheduledAt);
+                const draftOrderLookup = new Map(selectedGroupMembers.map((member) => [String(member.userId), member]));
+                const orderedDraftMembers = draftOrderUserIds
+                  .map((userId) => draftOrderLookup.get(String(userId)))
+                  .filter(Boolean);
 
                 return (
                   <>
@@ -1956,179 +2039,272 @@ function Draft({ auth, players = [] }) {
                       </button>
                     </div>
 
-                    <div className="groups-overview-grid">
-                      <article className="groups-overview-card groups-overview-card-invite">
-                        <p className="groups-overview-label">Invite Code</p>
-                        <p className="groups-overview-value">{selectedGroup.inviteCode}</p>
-                        <button type="button" className="groups-owner-action" onClick={handleCopyInviteCode}>
-                          Copy Invite Code
-                        </button>
-                      </article>
-
-                      <article className="groups-overview-card groups-overview-card-draft-time">
-                        <p className="groups-overview-label">Draft Time</p>
-                        <div className="groups-overview-value groups-overview-value-multi groups-overview-draft-time-value">
-                          <span className="groups-overview-draft-time-date">{draftDisplay.date}</span>
-                          {draftDisplay.time ? (
-                            <span className="groups-overview-draft-time-time">{draftDisplay.time}</span>
-                          ) : null}
-                        </div>
-                        <p className="groups-overview-subtext groups-overview-draft-time-subtext">{toRelativeDraftLabel(selectedGroup.draftScheduledAt)}</p>
-                      </article>
-
-                      <article className="groups-overview-card">
-                        <p className="groups-overview-label">Team Summary</p>
-                        <p className="groups-overview-value">{selectedGroupMembers.length} teams</p>
-                        <p className="groups-overview-subtext">
-                          {isSelectedGroupOwner ? 'You manage this group' : 'You are a member of this group'}
-                        </p>
-                      </article>
+                    <div className="groups-info-toggle-row">
+                      <button
+                        type="button"
+                        className={`groups-owner-action groups-info-toggle ${isGroupInfoOpen ? 'open' : ''}`}
+                        onClick={() => setIsGroupInfoOpen((current) => !current)}
+                        aria-expanded={isGroupInfoOpen}
+                      >
+                        <span>{isGroupInfoOpen ? 'Hide Group Info' : 'Show Group Info'}</span>
+                        <span className="groups-info-toggle-chevron" aria-hidden="true">▾</span>
+                      </button>
                     </div>
 
-                    {isSelectedGroupOwner && (
-                      <div className="groups-owner-actions-panel">
-                        <p className="groups-overview-label groups-owner-actions-title">Owner Tools</p>
-                        <div className="groups-owner-actions">
-                          {!isEditingGroupName ? (
-                            <button
-                              type="button"
-                              className="groups-owner-action"
-                              onClick={() => {
-                                setEditingGroupName(selectedGroup.name || '');
-                                setIsEditingGroupName(true);
-                                setGroupStatusMessage('');
-                              }}
-                            >
-                              Rename Group
+                    {isGroupInfoOpen && (
+                      <>
+                        <div className="groups-overview-grid">
+                          <article className="groups-overview-card groups-overview-card-invite">
+                            <p className="groups-overview-label">Invite Code</p>
+                            <p className="groups-overview-value">{selectedGroup.inviteCode}</p>
+                            <button type="button" className="groups-owner-action" onClick={handleCopyInviteCode}>
+                              Copy Invite Code
                             </button>
-                          ) : null}
-                          {!isEditingDraftSchedule ? (
-                            <button
-                              type="button"
-                              className="groups-owner-action"
-                              onClick={() => {
-                                setEditingDraftDateTime(toDateTimeInputValue(selectedGroup.draftScheduledAt));
-                                setIsEditingDraftSchedule(true);
-                                setGroupStatusMessage('');
-                              }}
-                            >
-                              Set Draft Time
-                            </button>
-                          ) : null}
-                          <button
-                            type="button"
-                            className="groups-owner-action groups-owner-action-danger"
-                            onClick={handleDeleteGroup}
-                            disabled={deletingGroupId === selectedGroup._id}
-                          >
-                            {deletingGroupId === selectedGroup._id ? 'Deleting...' : 'Delete Group'}
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {isSelectedGroupOwner && isEditingDraftSchedule && (
-                      <div className="groups-rename-panel">
-                        <input
-                          type="datetime-local"
-                          value={editingDraftDateTime}
-                          onChange={(event) => setEditingDraftDateTime(event.target.value)}
-                          className="groups-create-input"
-                        />
-                        <div className="groups-create-actions groups-schedule-actions">
-                          <button
-                            type="button"
-                            className="draft-button groups-create-confirm groups-schedule-button"
-                            onClick={handleSaveDraftSchedule}
-                            disabled={savingDraftSchedule}
-                          >
-                            {savingDraftSchedule ? 'Saving...' : 'Save Draft Time'}
-                          </button>
-                          <button
-                            type="button"
-                            className="draft-button groups-create-cancel groups-schedule-button"
-                            onClick={() => {
-                              setEditingDraftDateTime('');
-                            }}
-                            disabled={savingDraftSchedule}
-                          >
-                            Clear
-                          </button>
-                          <button
-                            type="button"
-                            className="draft-button groups-create-cancel groups-schedule-button"
-                            onClick={() => {
-                              setIsEditingDraftSchedule(false);
-                              setEditingDraftDateTime(toDateTimeInputValue(selectedGroup.draftScheduledAt));
-                            }}
-                            disabled={savingDraftSchedule}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    {isSelectedGroupOwner && isEditingGroupName && (
-                      <div className="groups-rename-panel">
-                        <input
-                          type="text"
-                          value={editingGroupName}
-                          onChange={(event) => setEditingGroupName(event.target.value)}
-                          className="groups-create-input"
-                          placeholder="Group name"
-                        />
-                        <div className="groups-create-actions">
-                          <button
-                            type="button"
-                            className="draft-button groups-create-confirm"
-                            onClick={handleRenameGroup}
-                            disabled={savingGroupName || !editingGroupName.trim()}
-                          >
-                            {savingGroupName ? 'Saving...' : 'Save Name'}
-                          </button>
-                          <button
-                            type="button"
-                            className="draft-button groups-create-cancel"
-                            onClick={() => {
-                              setIsEditingGroupName(false);
-                              setEditingGroupName(selectedGroup.name || '');
-                            }}
-                          >
-                            Cancel
-                          </button>
-                        </div>
-                      </div>
-                    )}
-
-                    <div className="group-members-grid">
-                      {selectedGroupMembers.map((member) => {
-                        const isOwner = member.userId === selectedGroup.ownerUserId;
-                        const isMe = member.userId === auth?.userId;
-                        const memberDisplayName = isMe
-                          ? (auth?.username || member.username)
-                          : member.username;
-                        const teamLabel = `${memberDisplayName}'s Team`;
-
-                        return (
-                          <article key={member.userId} className="group-member-card">
-                            <div className="group-member-top">
-                              <div className="group-member-heading">
-                                <div className="group-member-avatar">{getInitials(memberDisplayName)}</div>
-                                <div>
-                                  <h4>{teamLabel}</h4>
-                                  <p className="group-member-meta">Joined {new Date(member.joinedAt || selectedGroup.createdAt).toLocaleDateString()}</p>
-                                </div>
-                              </div>
-                              <span className={`group-role-badge ${isOwner ? 'owner' : 'member'}`}>
-                                {isOwner ? 'Owner' : 'Team'}
-                              </span>
-                            </div>
-                            <p className="group-member-note">{isMe ? 'This is your team.' : 'Group member team.'}</p>
                           </article>
-                        );
-                      })}
-                    </div>
+
+                          <article className="groups-overview-card groups-overview-card-draft-time">
+                            <p className="groups-overview-label">Draft Time</p>
+                            <div className="groups-overview-value groups-overview-value-multi groups-overview-draft-time-value">
+                              <span className="groups-overview-draft-time-date">{draftDisplay.date}</span>
+                              {draftDisplay.time ? (
+                                <span className="groups-overview-draft-time-time">{draftDisplay.time}</span>
+                              ) : null}
+                            </div>
+                            <p className="groups-overview-subtext groups-overview-draft-time-subtext">{toRelativeDraftLabel(selectedGroup.draftScheduledAt)}</p>
+                          </article>
+
+                          <article className="groups-overview-card">
+                            <p className="groups-overview-label">Team Summary</p>
+                            <p className="groups-overview-value">{selectedGroupMembers.length} teams</p>
+                            <p className="groups-overview-subtext">
+                              {isSelectedGroupOwner ? 'You manage this group' : 'You are a member of this group'}
+                            </p>
+                          </article>
+                        </div>
+
+                        {isSelectedGroupOwner && (
+                          <div className="groups-owner-actions-panel">
+                            <p className="groups-overview-label groups-owner-actions-title">Owner Tools</p>
+                            <div className="groups-owner-actions">
+                              {!isEditingGroupName ? (
+                                <button
+                                  type="button"
+                                  className="groups-owner-action"
+                                  onClick={() => {
+                                    setEditingGroupName(selectedGroup.name || '');
+                                    setIsEditingGroupName(true);
+                                    setGroupStatusMessage('');
+                                  }}
+                                >
+                                  Rename Group
+                                </button>
+                              ) : null}
+                              {!isEditingDraftSchedule ? (
+                                <button
+                                  type="button"
+                                  className="groups-owner-action"
+                                  onClick={() => {
+                                    setEditingDraftDateTime(toDateTimeInputValue(selectedGroup.draftScheduledAt));
+                                    setIsEditingDraftSchedule(true);
+                                    setGroupStatusMessage('');
+                                  }}
+                                >
+                                  Set Draft Time
+                                </button>
+                              ) : null}
+                              {!isEditingDraftOrder ? (
+                                <button
+                                  type="button"
+                                  className="groups-owner-action"
+                                  onClick={() => {
+                                    setDraftOrderUserIds(buildDraftOrderIdsForGroup(selectedGroup));
+                                    setIsEditingDraftOrder(true);
+                                    setGroupStatusMessage('');
+                                  }}
+                                >
+                                  Edit Draft Order
+                                </button>
+                              ) : null}
+                              <button
+                                type="button"
+                                className="groups-owner-action groups-owner-action-danger"
+                                onClick={handleDeleteGroup}
+                                disabled={deletingGroupId === selectedGroup._id}
+                              >
+                                {deletingGroupId === selectedGroup._id ? 'Deleting...' : 'Delete Group'}
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {isSelectedGroupOwner && isEditingDraftOrder && (
+                          <div className="groups-draft-order-panel">
+                            <p className="groups-overview-label groups-owner-actions-title">Draft Order</p>
+                            <p className="groups-overview-subtext">The order below will be used when this group draft starts.</p>
+                            <div className="groups-draft-order-list">
+                              {orderedDraftMembers.map((member, index) => {
+                                const memberDisplayName = member.userId === auth?.userId
+                                  ? (auth?.username || member.username)
+                                  : member.username;
+                                const isOwner = member.userId === selectedGroup.ownerUserId;
+
+                                return (
+                                  <div className="groups-draft-order-item" key={member.userId}>
+                                    <div className="groups-draft-order-rank">{index + 1}</div>
+                                    <div className="groups-draft-order-name-wrap">
+                                      <strong>{memberDisplayName}</strong>
+                                      {isOwner ? <span className="group-role-badge owner">Owner</span> : null}
+                                    </div>
+                                    <div className="groups-draft-order-actions">
+                                      <button
+                                        type="button"
+                                        className="groups-owner-action"
+                                        onClick={() => moveDraftOrderMember(index, index - 1)}
+                                        disabled={index === 0 || savingDraftOrder}
+                                      >
+                                        Up
+                                      </button>
+                                      <button
+                                        type="button"
+                                        className="groups-owner-action"
+                                        onClick={() => moveDraftOrderMember(index, index + 1)}
+                                        disabled={index === orderedDraftMembers.length - 1 || savingDraftOrder}
+                                      >
+                                        Down
+                                      </button>
+                                    </div>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                            <div className="groups-create-actions groups-schedule-actions">
+                              <button
+                                type="button"
+                                className="draft-button groups-create-confirm groups-schedule-button"
+                                onClick={handleSaveDraftOrder}
+                                disabled={savingDraftOrder || orderedDraftMembers.length === 0}
+                              >
+                                {savingDraftOrder ? 'Saving...' : 'Save Draft Order'}
+                              </button>
+                              <button
+                                type="button"
+                                className="draft-button groups-create-cancel groups-schedule-button"
+                                onClick={() => {
+                                  setIsEditingDraftOrder(false);
+                                  setDraftOrderUserIds(buildDraftOrderIdsForGroup(selectedGroup));
+                                }}
+                                disabled={savingDraftOrder}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {isSelectedGroupOwner && isEditingDraftSchedule && (
+                          <div className="groups-rename-panel">
+                            <input
+                              type="datetime-local"
+                              value={editingDraftDateTime}
+                              onChange={(event) => setEditingDraftDateTime(event.target.value)}
+                              className="groups-create-input"
+                            />
+                            <div className="groups-create-actions groups-schedule-actions">
+                              <button
+                                type="button"
+                                className="draft-button groups-create-confirm groups-schedule-button"
+                                onClick={handleSaveDraftSchedule}
+                                disabled={savingDraftSchedule}
+                              >
+                                {savingDraftSchedule ? 'Saving...' : 'Save Draft Time'}
+                              </button>
+                              <button
+                                type="button"
+                                className="draft-button groups-create-cancel groups-schedule-button"
+                                onClick={() => {
+                                  setEditingDraftDateTime('');
+                                }}
+                                disabled={savingDraftSchedule}
+                              >
+                                Clear
+                              </button>
+                              <button
+                                type="button"
+                                className="draft-button groups-create-cancel groups-schedule-button"
+                                onClick={() => {
+                                  setIsEditingDraftSchedule(false);
+                                  setEditingDraftDateTime(toDateTimeInputValue(selectedGroup.draftScheduledAt));
+                                }}
+                                disabled={savingDraftSchedule}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        {isSelectedGroupOwner && isEditingGroupName && (
+                          <div className="groups-rename-panel">
+                            <input
+                              type="text"
+                              value={editingGroupName}
+                              onChange={(event) => setEditingGroupName(event.target.value)}
+                              className="groups-create-input"
+                              placeholder="Group name"
+                            />
+                            <div className="groups-create-actions">
+                              <button
+                                type="button"
+                                className="draft-button groups-create-confirm"
+                                onClick={handleRenameGroup}
+                                disabled={savingGroupName || !editingGroupName.trim()}
+                              >
+                                {savingGroupName ? 'Saving...' : 'Save Name'}
+                              </button>
+                              <button
+                                type="button"
+                                className="draft-button groups-create-cancel"
+                                onClick={() => {
+                                  setIsEditingGroupName(false);
+                                  setEditingGroupName(selectedGroup.name || '');
+                                }}
+                              >
+                                Cancel
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div className="group-members-grid">
+                          {selectedGroupMembers.map((member) => {
+                            const isOwner = member.userId === selectedGroup.ownerUserId;
+                            const isMe = member.userId === auth?.userId;
+                            const memberDisplayName = isMe
+                              ? (auth?.username || member.username)
+                              : member.username;
+                            const teamLabel = `${memberDisplayName}'s Team`;
+
+                            return (
+                              <article key={member.userId} className="group-member-card">
+                                <div className="group-member-top">
+                                  <div className="group-member-heading">
+                                    <div className="group-member-avatar">{getInitials(memberDisplayName)}</div>
+                                    <div>
+                                      <h4>{teamLabel}</h4>
+                                      <p className="group-member-meta">Joined {new Date(member.joinedAt || selectedGroup.createdAt).toLocaleDateString()}</p>
+                                    </div>
+                                  </div>
+                                  <span className={`group-role-badge ${isOwner ? 'owner' : 'member'}`}>
+                                    {isOwner ? 'Owner' : 'Team'}
+                                  </span>
+                                </div>
+                                <p className="group-member-note">{isMe ? 'This is your team.' : 'Group member team.'}</p>
+                              </article>
+                            );
+                          })}
+                        </div>
+                      </>
+                    )}
                   </>
                 );
               })()}

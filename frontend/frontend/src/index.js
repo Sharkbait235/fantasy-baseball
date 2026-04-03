@@ -2,7 +2,10 @@ import React from 'react';
 import ReactDOM from 'react-dom/client';
 import './index.css';
 import App from './App';
+import { installLocalApiRewrite } from './api';
 import reportWebVitals from './reportWebVitals';
+
+installLocalApiRewrite();
 
 const root = ReactDOM.createRoot(document.getElementById('root'));
 root.render(

@@ -1,17 +1,18 @@
+
 import React, { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import './App.css';
 import Draft from './Draft';
 import Login from './Login';
 
 const FANTASY_POINTS_CACHE_KEY = 'fantasyPointsCache-v2-20260328';
+const TRADES_TAB_ENABLED = false;
 
 function App() {
   const [activeTab, setActiveTab] = useState('players');
   const [players, setPlayers] = useState([]);
-  const [positionPlayerSearch, setPositionPlayerSearch] = useState('');
-  const [positionPlayerFilter, setPositionPlayerFilter] = useState('ALL');
-  const [pitcherSearch, setPitcherSearch] = useState('');
-  const [pitcherRoleFilter, setPitcherRoleFilter] = useState('ALL');
+  const [playerSearch, setPlayerSearch] = useState('');
+  const [playerPositionFilter, setPlayerPositionFilter] = useState('ALL');
+  const [playersSortSeason, setPlayersSortSeason] = useState('2026');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [backendStatus, setBackendStatus] = useState('checking...');
@@ -80,6 +81,16 @@ function App() {
     () => new Map((players || []).map((player) => [String(player._id), player])),
     [players]
   );
+
+  const playersByName = useMemo(() => {
+    const map = new Map();
+    for (const player of players || []) {
+      const key = String(player?.name || '').trim().toLowerCase();
+      if (!key || map.has(key)) continue;
+      map.set(key, player);
+    }
+    return map;
+  }, [players]);
 
   useEffect(() => {
     try {
@@ -255,6 +266,12 @@ function App() {
 
     return [...latestByPlayerId.values()];
   };
+
+  const normalizeTeamOverviewTeam = useCallback((team) => ({
+    ...team,
+    picks: dedupePicksByPlayerId(team?.picks || []),
+    benchPlayerIds: [...new Set((team?.benchPlayerIds || []).map(String))].slice(0, MAX_BENCH_SLOTS)
+  }), []);
 
   const buildRosterSlots = (picks, allPlayers, benchPlayerIds = []) => {
     const limitedBenchIds = [...new Set((benchPlayerIds || []).map(String))].slice(0, MAX_BENCH_SLOTS);
@@ -448,9 +465,17 @@ function App() {
 
   const getPitcherRole = (player, preferredSeason = 2026) => resolveRosterPosition(player, preferredSeason) || 'RP';
 
-  const matchesPositionFilter = (playerPosition, selectedFilter) => {
+  const matchesPositionFilter = (playerOrPosition, selectedFilter) => {
     if (selectedFilter === 'ALL') return true;
-    const normalizedPosition = String(playerPosition || '').toUpperCase();
+
+    if (selectedFilter === 'SP' || selectedFilter === 'RP') {
+      return getPitcherRole(playerOrPosition, 2026) === selectedFilter;
+    }
+
+    const normalizedPosition = typeof playerOrPosition === 'object'
+      ? String(playerOrPosition?.position || '').toUpperCase()
+      : String(playerOrPosition || '').toUpperCase();
+
     return normalizedPosition
       .split(/[\/,\s]+/)
       .map((value) => value.trim())
@@ -553,33 +578,16 @@ function App() {
         .filter(Boolean))
   )].sort((a, b) => a.localeCompare(b));
 
-  const filteredPositionPlayers = players
-    .filter((player) => player.position !== 'P')
+  const filteredAllPlayers = players
     .filter((player) => (
-      player.name.toLowerCase().includes(positionPlayerSearch.toLowerCase())
-      || player.team.toLowerCase().includes(positionPlayerSearch.toLowerCase())
-      || player.position.toLowerCase().includes(positionPlayerSearch.toLowerCase())
+      player.name.toLowerCase().includes(playerSearch.toLowerCase())
+      || player.team.toLowerCase().includes(playerSearch.toLowerCase())
+      || player.position.toLowerCase().includes(playerSearch.toLowerCase())
     ))
-    .filter((player) => matchesPositionFilter(player.position, positionPlayerFilter))
+    .filter((player) => matchesPositionFilter(player, playerPositionFilter))
     .sort((a, b) => {
-      const aPoints = Number(fantasyPointsCache[`${a._id}-2026`]);
-      const bPoints = Number(fantasyPointsCache[`${b._id}-2026`]);
-      const safeA = Number.isFinite(aPoints) ? aPoints : -Infinity;
-      const safeB = Number.isFinite(bPoints) ? bPoints : -Infinity;
-      return safeB - safeA;
-    });
-
-  const filteredPitchers = players
-    .filter((player) => player.position === 'P')
-    .filter((player) => (
-      player.name.toLowerCase().includes(pitcherSearch.toLowerCase())
-      || player.team.toLowerCase().includes(pitcherSearch.toLowerCase())
-      || player.position.toLowerCase().includes(pitcherSearch.toLowerCase())
-    ))
-    .filter((player) => pitcherRoleFilter === 'ALL' || getPitcherRole(player, 2026) === pitcherRoleFilter)
-    .sort((a, b) => {
-      const aPoints = Number(fantasyPointsCache[`${a._id}-2026`]);
-      const bPoints = Number(fantasyPointsCache[`${b._id}-2026`]);
+      const aPoints = Number(fantasyPointsCache[`${a._id}-${playersSortSeason}`]);
+      const bPoints = Number(fantasyPointsCache[`${b._id}-${playersSortSeason}`]);
       const safeA = Number.isFinite(aPoints) ? aPoints : -Infinity;
       const safeB = Number.isFinite(bPoints) ? bPoints : -Infinity;
       return safeB - safeA;
@@ -600,7 +608,6 @@ function App() {
     const cachedPoints = fantasyPointsCache[cacheKey];
     if (cachedPoints !== undefined) return cachedPoints;
 
-    // Always wait for backend-scored values for season point displays.
     return undefined;
   };
 
@@ -882,6 +889,7 @@ function App() {
     }
   };
 
+
   const handleDropPlayer = async (player) => {
     if (!auth?.token || !player?._id) return;
 
@@ -1009,23 +1017,73 @@ function App() {
       const data = await res.json();
       if (!res.ok) throw new Error(data?.message || 'Failed to load team overviews');
 
-      setStandingsTeams(Array.isArray(data?.teams) ? data.teams : []);
+      const normalizedTeams = (Array.isArray(data?.teams) ? data.teams : []).map(normalizeTeamOverviewTeam);
+      setStandingsTeams(normalizedTeams);
     } catch (err) {
       setStandingsTeams([]);
       setStandingsTeamsError(err.message || 'Failed to load team overviews');
     } finally {
       setStandingsTeamsLoading(false);
     }
-  }, [auth?.token, selectedMyTeamGroupId]);
+  }, [auth?.token, selectedMyTeamGroupId, normalizeTeamOverviewTeam]);
+
+  const getStandingsTeamSelectionKey = useCallback((teamLike) => {
+    const userId = String(teamLike?.userId || '').trim();
+    if (userId) return `uid:${userId}`;
+
+    const teamName = String(teamLike?.teamName || teamLike?.username || teamLike?.name || '').trim().toLowerCase();
+    if (teamName) return `name:${teamName}`;
+
+    const fallbackId = String(teamLike?.teamId || teamLike?._id || '').trim();
+    return fallbackId ? `id:${fallbackId}` : '';
+  }, []);
+
+  const normalizeTeamName = useCallback(
+    (nameValue) => String(nameValue || '').trim().toLowerCase(),
+    []
+  );
+
+  const getOverviewTeamForStandingsRow = useCallback((teamLike) => {
+    if (!teamLike) return null;
+
+    const targetUserId = String(teamLike?.userId || '').trim();
+    if (targetUserId) {
+      const byUserId = standingsTeams.find((team) => String(team?.userId || '').trim() === targetUserId);
+      if (byUserId) return byUserId;
+    }
+
+    const targetName = normalizeTeamName(teamLike?.teamName || teamLike?.username || teamLike?.name);
+    if (targetName) {
+      const byName = standingsTeams.find((team) => (
+        normalizeTeamName(team?.username || team?.teamName || team?.name) === targetName
+      ));
+      if (byName) return byName;
+    }
+
+    const targetKey = getStandingsTeamSelectionKey(teamLike);
+    return standingsTeams.find((team) => getStandingsTeamSelectionKey(team) === targetKey) || null;
+  }, [standingsTeams, normalizeTeamName, getStandingsTeamSelectionKey]);
 
   const selectedStandingsTeam = useMemo(() => {
     if (!selectedStandingsTeamKey) return null;
 
-    return standingsTeams.find((team) => {
-      const rosterKey = team?.userId || `name:${team?.username || 'Unknown User'}`;
-      return rosterKey === selectedStandingsTeamKey;
-    }) || null;
-  }, [standingsTeams, selectedStandingsTeamKey]);
+    const exact = standingsTeams.find((team) => getStandingsTeamSelectionKey(team) === selectedStandingsTeamKey);
+    if (exact) return exact;
+
+    if (selectedStandingsTeamKey.startsWith('uid:')) {
+      const targetUserId = selectedStandingsTeamKey.slice(4);
+      return standingsTeams.find((team) => String(team?.userId || '').trim() === targetUserId) || null;
+    }
+
+    if (selectedStandingsTeamKey.startsWith('name:')) {
+      const targetName = normalizeTeamName(selectedStandingsTeamKey.slice(5));
+      return standingsTeams.find((team) => (
+        normalizeTeamName(team?.username || team?.teamName || team?.name) === targetName
+      )) || null;
+    }
+
+    return null;
+  }, [standingsTeams, selectedStandingsTeamKey, getStandingsTeamSelectionKey, normalizeTeamName]);
 
   const selectedStandingsTeamPlayers = useMemo(() => {
     if (!selectedStandingsTeam) return [];
@@ -1034,23 +1092,26 @@ function App() {
 
     return (selectedStandingsTeam.picks || [])
       .map((pick) => {
-        const player = playersById.get(String(pick.playerId));
+        const playerId = String(pick.playerId || '');
+        const playerNameKey = String(pick.playerName || '').trim().toLowerCase();
+        const player = playersById.get(playerId) || playersByName.get(playerNameKey);
         return {
-          playerId: String(pick.playerId || ''),
+          playerId,
+          resolvedPlayerId: String(player?._id || playerId),
           playerName: pick.playerName || player?.name || 'Unknown Player',
           photoUrl: player?.photoUrl || '',
-          position: player?.position || '—',
-          team: player?.team || '—',
+          position: pick.position || player?.position || '—',
+          team: pick.team || player?.team || '—',
           round: pick.round || null,
           draftName: pick.draftName || 'Draft',
-          isBench: benchSet.has(String(pick.playerId || ''))
+          isBench: benchSet.has(playerId)
         };
       })
       .sort((a, b) => {
         if (a.isBench !== b.isBench) return Number(a.isBench) - Number(b.isBench);
         return Number(a.round || 999) - Number(b.round || 999);
       });
-  }, [selectedStandingsTeam, playersById]);
+  }, [selectedStandingsTeam, playersById, playersByName]);
 
   const fetchTradeTeams = useCallback(async () => {
     if (!auth?.token) return;
@@ -1448,6 +1509,96 @@ function App() {
       .filter(Boolean);
   }, [activeTab, selectedStandingsTeam, selectedStandingsTeamPlayers, playersById]);
 
+  const standingsAllScoringTargets = useMemo(() => {
+    if (activeTab !== 'standings') return [];
+
+    const seen = new Set();
+    const targets = [];
+
+    for (const team of standingsTeams || []) {
+      for (const pick of team?.picks || []) {
+        const pickPlayerId = String(pick?.playerId || '').trim();
+        const pickPlayerNameKey = String(pick?.playerName || '').trim().toLowerCase();
+        const fullPlayer = playersById.get(pickPlayerId) || playersByName.get(pickPlayerNameKey);
+        const resolvedPlayerId = String(fullPlayer?._id || pickPlayerId || '').trim();
+        if (!resolvedPlayerId) continue;
+
+        const season = fullPlayer ? getLatestSeasonForPlayer(fullPlayer) : 2026;
+        const cacheKey = `${resolvedPlayerId}-${season}`;
+        if (seen.has(cacheKey)) continue;
+
+        seen.add(cacheKey);
+        targets.push({
+          playerId: resolvedPlayerId,
+          season,
+          cacheKey
+        });
+      }
+    }
+
+    return targets;
+  }, [activeTab, standingsTeams, playersById, playersByName]);
+
+  const standingsComputedTotalsByTeamKey = useMemo(() => {
+    const totalsByTeam = new Map();
+
+    for (const team of standingsTeams || []) {
+      let total = 0;
+      let hasPending = false;
+
+      for (const pick of team?.picks || []) {
+        const pickPlayerId = String(pick?.playerId || '').trim();
+        const pickPlayerNameKey = String(pick?.playerName || '').trim().toLowerCase();
+        const fullPlayer = playersById.get(pickPlayerId) || playersByName.get(pickPlayerNameKey);
+        const resolvedPlayerId = String(fullPlayer?._id || pickPlayerId || '').trim();
+        if (!resolvedPlayerId) continue;
+
+        const season = fullPlayer ? getLatestSeasonForPlayer(fullPlayer) : 2026;
+        const cacheKey = `${resolvedPlayerId}-${season}`;
+        const points = fantasyPointsCache[cacheKey];
+
+        if (points === undefined) {
+          hasPending = true;
+          continue;
+        }
+
+        if (typeof points === 'number' && Number.isFinite(points)) {
+          total += points;
+        }
+      }
+
+      totalsByTeam.set(getStandingsTeamSelectionKey(team), { total, hasPending });
+    }
+
+    return totalsByTeam;
+  }, [standingsTeams, playersById, playersByName, fantasyPointsCache, getStandingsTeamSelectionKey]);
+
+  const sortedStandings = useMemo(() => {
+    return [...(standings || [])].sort((teamA, teamB) => {
+      const matchedOverviewTeamA = getOverviewTeamForStandingsRow(teamA);
+      const keyA = matchedOverviewTeamA
+        ? getStandingsTeamSelectionKey(matchedOverviewTeamA)
+        : getStandingsTeamSelectionKey(teamA);
+      const computedA = standingsComputedTotalsByTeamKey.get(keyA);
+      const totalA = computedA ? computedA.total : Number(teamA?.totalPoints || 0);
+
+      const matchedOverviewTeamB = getOverviewTeamForStandingsRow(teamB);
+      const keyB = matchedOverviewTeamB
+        ? getStandingsTeamSelectionKey(matchedOverviewTeamB)
+        : getStandingsTeamSelectionKey(teamB);
+      const computedB = standingsComputedTotalsByTeamKey.get(keyB);
+      const totalB = computedB ? computedB.total : Number(teamB?.totalPoints || 0);
+
+      if (totalB !== totalA) return totalB - totalA;
+
+      const fallbackRankA = Number(teamA?.rank || 999);
+      const fallbackRankB = Number(teamB?.rank || 999);
+      if (fallbackRankA !== fallbackRankB) return fallbackRankA - fallbackRankB;
+
+      return String(teamA?.teamName || '').localeCompare(String(teamB?.teamName || ''));
+    });
+  }, [standings, standingsComputedTotalsByTeamKey, getOverviewTeamForStandingsRow, getStandingsTeamSelectionKey]);
+
   const playersTabScoringTargets = useMemo(() => {
     return players
       .filter((player) => player?._id)
@@ -1627,12 +1778,13 @@ function App() {
   }, [activeTab, standingsTeamScoringTargets, fantasyPointsCache]);
 
   useEffect(() => {
-    if (playersTabScoringTargets.length === 0) return;
+    if (activeTab !== 'standings') return;
+    if (standingsAllScoringTargets.length === 0) return;
 
     let cancelled = false;
 
     const fetchFantasyPoints = async () => {
-      const pendingTargets = playersTabScoringTargets.filter((target) => fantasyPointsCache[target.cacheKey] === undefined);
+      const pendingTargets = standingsAllScoringTargets.filter((target) => fantasyPointsCache[target.cacheKey] === undefined);
       if (pendingTargets.length === 0) return;
 
       await Promise.all(pendingTargets.map(async (target) => {
@@ -1664,7 +1816,90 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [playersTabScoringTargets, fantasyPointsCache]);
+  }, [activeTab, standingsAllScoringTargets, fantasyPointsCache]);
+
+  useEffect(() => {
+    // Only run when Players tab is active and there are players
+    if (activeTab !== 'players' || players.length === 0) return;
+
+    let cancelled = false;
+
+    const fetchBatchFantasyPoints = async () => {
+      try {
+        const res = await fetch('https://fantasy-baseball-o8ta.onrender.com/api/players/fantasy-points/batch?season=2026');
+        if (!res.ok) throw new Error('Failed to fetch batch fantasy points');
+        const data = await res.json();
+        // data is an array of { playerId, totals: { fantasyPoints } }
+        const batchCache = {};
+        for (const entry of data) {
+          if (!entry?.playerId) continue;
+          const cacheKey = `${entry.playerId}-2026`;
+          const points = Number(entry?.totals?.fantasyPoints);
+          batchCache[cacheKey] = Number.isFinite(points) ? points : 0;
+        }
+        if (!cancelled) {
+          setFantasyPointsCache((prev) => ({ ...prev, ...batchCache }));
+        }
+      } catch (err) {
+        // fallback: do nothing, let per-player fetches handle it
+      }
+    };
+
+    fetchBatchFantasyPoints();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, players]);
+
+  // Dedicated effect to fill in missing points after batch
+  useEffect(() => {
+    if (activeTab !== 'players' || players.length === 0) return;
+    // Fetch missing points for both current and prior season columns.
+    players.forEach((player) => {
+      if (!player?._id) return;
+      const seasonsToLoad = [2025, 2026];
+      seasonsToLoad.forEach((season) => {
+        const cacheKey = `${player._id}-${season}`;
+        const points = fantasyPointsCache[cacheKey];
+        if (points === undefined || points === null || isNaN(points)) {
+          fetchFantasyPointsForSeason(player._id, season);
+        }
+      });
+    });
+  }, [activeTab, players, fantasyPointsCache, fetchFantasyPointsForSeason]);
+
+  useEffect(() => {
+    if (activeTab !== 'players' || players.length === 0) return;
+
+    let cancelled = false;
+
+    const fetchBatchFantasyPoints2025 = async () => {
+      try {
+        const res = await fetch('https://fantasy-baseball-o8ta.onrender.com/api/players/fantasy-points/batch?season=2025');
+        if (!res.ok) throw new Error('Failed to fetch batch fantasy points');
+        const data = await res.json();
+        const batchCache = {};
+        for (const entry of data) {
+          if (!entry?.playerId) continue;
+          const cacheKey = `${entry.playerId}-2025`;
+          const points = Number(entry?.totals?.fantasyPoints);
+          batchCache[cacheKey] = Number.isFinite(points) ? points : 0;
+        }
+        if (!cancelled) {
+          setFantasyPointsCache((prev) => ({ ...prev, ...batchCache }));
+        }
+      } catch (err) {
+        // fallback: do nothing, let per-player fetches handle it
+      }
+    };
+
+    fetchBatchFantasyPoints2025();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [activeTab, players]);
 
   useEffect(() => {
     if (activeTab === 'standings' && selectedMyTeamGroupId) {
@@ -1777,7 +2012,7 @@ function App() {
     if (!auth?.token) return;
 
     try {
-      const res = await fetch(`https://fantas/y-baseball-o8ta.onrender.com/api/trades/${tradeId}/respond`, {
+      const res = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/trades/${tradeId}/respond`, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -1913,32 +2148,32 @@ function App() {
         <nav className="tabs-navigation">
           <div className="center-tabs">
             <button 
-              className={`tab ${activeTab === 'players' ? 'active' : ''}`}
+              className={`tab tab-players ${activeTab === 'players' ? 'active' : ''}`}
               onClick={() => setActiveTab('players')}
             >
               Players
             </button>
             <button
-              className={`tab ${activeTab === 'group' ? 'active' : ''}`}
+              className={`tab tab-groups ${activeTab === 'group' ? 'active' : ''}`}
               onClick={() => setActiveTab('group')}
             >
               My Groups
             </button>
             <button 
-              className={`tab ${activeTab === 'my-team' ? 'active' : ''}`}
+              className={`tab tab-myteam ${activeTab === 'my-team' ? 'active' : ''}`}
               onClick={() => { setActiveTab('my-team'); fetchMyTeam(); }}
             >
               My Team
             </button>
-            <button
-              className={`tab ${activeTab === 'trades' ? 'active' : ''}`}
-              onClick={() => setActiveTab('trades')}
-            >
-              Trades
-            </button>
             <button 
-              className={`tab ${activeTab === 'standings' ? 'active' : ''}`}
-              onClick={() => setActiveTab('standings')}
+              className={`tab tab-standings ${activeTab === 'standings' ? 'active' : ''}`}
+              onClick={() => {
+                setActiveTab('standings');
+                if (selectedMyTeamGroupId) {
+                  fetchStandings();
+                  fetchStandingsTeams();
+                }
+              }}
             >
               Standings
             </button>
@@ -1952,27 +2187,10 @@ function App() {
 
         {/* Players Tab */}
         {activeTab === 'players' && (
-          <div className="tab-content">
-            <div className="tab-section-header">
-              <h2>Players</h2>
-              <label className="tab-group-filter">
-                <span>Current Group</span>
-                <select
-                  value={selectedMyTeamGroupId}
-                  onChange={(e) => setSelectedMyTeamGroupId(e.target.value)}
-                  disabled={myTeamGroupsLoading || myTeamGroups.length === 0}
-                >
-                  {myTeamGroups.length === 0 ? (
-                    <option value="">No groups available</option>
-                  ) : (
-                    myTeamGroups.map((group) => (
-                      <option value={group._id} key={group._id}>{group.name}</option>
-                    ))
-                  )}
-                </select>
-              </label>
+          <div className="tab-content players-broadcast-view">
+            <div className="tab-section-header players-tab-header">
+              <h2 className="players-tab-title">Players</h2>
             </div>
-            {currentGroup && <p className="tab-group-caption">Showing availability for {currentGroup.name}.</p>}
             {loading && <p className="loading">Loading players...</p>}
             {error && (
               <div className="error">
@@ -1985,22 +2203,21 @@ function App() {
             )}
             {!loading && !error && players.length > 0 && (
               <div className="players-columns">
-                {/* Position Players Column */}
                 <div className="player-column">
-                  <h3>Position Players</h3>
+                  <h3>Players</h3>
                   <div className="player-column-controls">
                     <div className="search-container">
                       <input
                         type="text"
-                        placeholder="🔍 Search position players..."
-                        value={positionPlayerSearch}
-                        onChange={(e) => setPositionPlayerSearch(e.target.value)}
+                        placeholder="🔍 Search players..."
+                        value={playerSearch}
+                        onChange={(e) => setPlayerSearch(e.target.value)}
                         className="search-input"
                       />
-                      {positionPlayerSearch && (
-                        <button 
+                      {playerSearch && (
+                        <button
                           className="search-clear"
-                          onClick={() => setPositionPlayerSearch('')}
+                          onClick={() => setPlayerSearch('')}
                         >
                           ✕
                         </button>
@@ -2010,216 +2227,143 @@ function App() {
                       <button
                         type="button"
                         className="player-filter-reset"
-                        disabled={!positionPlayerSearch && positionPlayerFilter === 'ALL'}
+                        disabled={!playerSearch && playerPositionFilter === 'ALL'}
                         onClick={() => {
-                          setPositionPlayerSearch('');
-                          setPositionPlayerFilter('ALL');
+                          setPlayerSearch('');
+                          setPlayerPositionFilter('ALL');
                         }}
                       >
                         Clear Filters
                       </button>
                       <select
                         className="player-filter-select"
-                        value={positionPlayerFilter}
-                        onChange={(e) => setPositionPlayerFilter(e.target.value)}
+                        value={playerPositionFilter}
+                        onChange={(e) => setPlayerPositionFilter(e.target.value)}
                       >
                         <option value="ALL">All Positions</option>
                         {positionPlayerOptions.map((position) => (
                           <option value={position} key={position}>{position}</option>
                         ))}
-                      </select>
-                    </div>
-                  </div>
-                  
-                  <div className="players-list-scroll">
-                    {filteredPositionPlayers.length === 0 ? (
-                      <p className="no-players">No position players match your filters.</p>
-                    ) : (
-                      <table className="players-table players-table-position">
-                        <thead>
-                          <tr>
-                            <th>Name</th>
-                            <th>Team</th>
-                            <th>POS</th>
-                            <th>2026 FP</th>
-                            <th>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredPositionPlayers.map((player) => (
-                            <tr key={player._id} className="clickable-row" onClick={() => setSelectedPlayer(player)}>
-                              <td>
-                                <div className="player-name-cell">
-                                  <img src={getPlayerPhoto(player)} alt={player.name} className="player-photo" />
-                                  <span>{player.name}</span>
-                                </div>
-                              </td>
-                              <td>
-                                <div className="team-cell">
-                                  <img src={getTeamLogo(player.team)} alt={player.team} className="team-logo" />
-                                  <span>{player.team}</span>
-                                </div>
-                              </td>
-                              <td>{player.position}</td>
-                              <td>{(() => {
-                                const points = fantasyPointsCache[`${player._id}-2026`];
-                                return points === undefined ? 'Loading...' : points === null ? 'N/A' : points;
-                              })()}</td>
-                              <td>
-                                {(() => {
-                                  const isOwned = groupPickedPlayerIds.includes(String(player._id));
-                                  const ownerTeamName = groupPlayerOwnerById[String(player._id)] || '';
-                                  const hasPositionSlot = hasOpenSlotForPosition(player);
-                                  const canPickup = selectedMyTeamGroupId && canPickupInCurrentGroup && hasPositionSlot && !isOwned;
-                                  const isLoadingPickup = pickupLoadingPlayerId === player._id;
-                                  const buttonLabel = !selectedMyTeamGroupId
-                                    ? 'Select Group'
-                                    : !canPickupInCurrentGroup
-                                      ? (!currentGroup?.draftScheduledAt ? 'Set Draft Time' : 'After Draft')
-                                    : isOwned
-                                      ? (ownerTeamName ? `On ${ownerTeamName}` : 'On Team')
-                                      : !hasPositionSlot
-                                        ? 'Position Full'
-                                        : (isLoadingPickup ? 'Adding...' : 'Pick Up');
-
-                                  return (
-                                    <button
-                                      type="button"
-                                      className="pickup-player-btn"
-                                      disabled={!canPickup || isLoadingPickup}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (canPickup) handlePickupPlayer(player);
-                                      }}
-                                    >
-                                      {buttonLabel}
-                                    </button>
-                                  );
-                                })()}
-                              </td>
-                            </tr>
-                            ))}
-                        </tbody>
-                      </table>
-                    )}
-                  </div>
-                </div>
-
-                {/* Pitchers Column */}
-                <div className="player-column">
-                  <h3>Pitchers</h3>
-                  <div className="player-column-controls">
-                    <div className="search-container">
-                      <input
-                        type="text"
-                        placeholder="🔍 Search pitchers..."
-                        value={pitcherSearch}
-                        onChange={(e) => setPitcherSearch(e.target.value)}
-                        className="search-input"
-                      />
-                      {pitcherSearch && (
-                        <button 
-                          className="search-clear"
-                          onClick={() => setPitcherSearch('')}
-                        >
-                          ✕
-                        </button>
-                      )}
-                    </div>
-                    <div className="player-filter-stack">
-                      <button
-                        type="button"
-                        className="player-filter-reset"
-                        disabled={!pitcherSearch && pitcherRoleFilter === 'ALL'}
-                        onClick={() => {
-                          setPitcherSearch('');
-                          setPitcherRoleFilter('ALL');
-                        }}
-                      >
-                        Clear Filters
-                      </button>
-                      <select
-                        className="player-filter-select"
-                        value={pitcherRoleFilter}
-                        onChange={(e) => setPitcherRoleFilter(e.target.value)}
-                      >
-                        <option value="ALL">All Roles</option>
+                        <option value="P">P</option>
                         <option value="SP">SP</option>
                         <option value="RP">RP</option>
                       </select>
                     </div>
                   </div>
 
-                  <div className="players-list-scroll">
-                    {filteredPitchers.length === 0 ? (
-                      <p className="no-players">No pitchers match your filters.</p>
-                    ) : (
-                      <table className="players-table players-table-pitchers">
-                        <thead>
-                          <tr>
-                            <th>Name</th>
-                            <th>Team</th>
-                            <th>POS</th>
-                            <th>2026 FP</th>
-                            <th>Action</th>
-                          </tr>
-                        </thead>
-                        <tbody>
-                          {filteredPitchers.map((player) => (
-                            <tr key={player._id} className="clickable-row" onClick={() => setSelectedPlayer(player)}>
-                              <td>
-                                <div className="player-name-cell">
-                                  <img src={getPlayerPhoto(player)} alt={player.name} className="player-photo" />
-                                  <span>{player.name}</span>
-                                </div>
-                              </td>
-                              <td>
-                                <div className="team-cell">
-                                  <img src={getTeamLogo(player.team)} alt={player.team} className="team-logo" />
-                                  <span>{player.team}</span>
-                                </div>
-                              </td>
-                              <td>{getPitcherRole(player, 2026)}</td>
-                              <td>{(() => {
-                                const points = fantasyPointsCache[`${player._id}-2026`];
-                                return points === undefined ? 'Loading...' : points === null ? 'N/A' : points;
-                              })()}</td>
-                              <td>
-                                {(() => {
-                                  const isOwned = groupPickedPlayerIds.includes(String(player._id));
-                                  const ownerTeamName = groupPlayerOwnerById[String(player._id)] || '';
-                                  const hasPositionSlot = hasOpenSlotForPosition(player);
-                                  const canPickup = selectedMyTeamGroupId && canPickupInCurrentGroup && hasPositionSlot && !isOwned;
-                                  const isLoadingPickup = pickupLoadingPlayerId === player._id;
-                                  const buttonLabel = !selectedMyTeamGroupId
-                                    ? 'Select Group'
-                                    : !canPickupInCurrentGroup
-                                      ? (!currentGroup?.draftScheduledAt ? 'Set Draft Time' : 'After Draft')
-                                    : isOwned
-                                      ? (ownerTeamName ? `On ${ownerTeamName}` : 'On Team')
-                                      : !hasPositionSlot
-                                        ? 'Position Full'
-                                        : (isLoadingPickup ? 'Adding...' : 'Pick Up');
+                  <div className="players-mobile-sort" role="group" aria-label="Sort players by fantasy points season">
+                    <span>Sort By</span>
+                    <button
+                      type="button"
+                      className={`players-mobile-sort-btn ${playersSortSeason === '2025' ? 'active' : ''}`}
+                      onClick={() => setPlayersSortSeason('2025')}
+                    >
+                      2025 FP
+                    </button>
+                    <button
+                      type="button"
+                      className={`players-mobile-sort-btn ${playersSortSeason === '2026' ? 'active' : ''}`}
+                      onClick={() => setPlayersSortSeason('2026')}
+                    >
+                      2026 FP
+                    </button>
+                  </div>
 
-                                  return (
-                                    <button
-                                      type="button"
-                                      className="pickup-player-btn"
-                                      disabled={!canPickup || isLoadingPickup}
-                                      onClick={(e) => {
-                                        e.stopPropagation();
-                                        if (canPickup) handlePickupPlayer(player);
-                                      }}
-                                    >
-                                      {buttonLabel}
-                                    </button>
-                                  );
-                                })()}
-                              </td>
+                  <div className="players-list-scroll">
+                    {filteredAllPlayers.length === 0 ? (
+                      <p className="no-players">No players match your filters.</p>
+                    ) : (
+                      <>
+                        <div className="players-mobile-list">
+                          {filteredAllPlayers.map((player) => {
+                            const points2025 = fantasyPointsCache[`${player._id}-2025`];
+                            const points2026 = fantasyPointsCache[`${player._id}-2026`];
+
+                            return (
+                              <article
+                                key={player._id}
+                                className="player-mobile-card clickable-row"
+                                onClick={() => setSelectedPlayer(player)}
+                              >
+                                <div className="player-mobile-card-header">
+                                  <img src={getPlayerPhoto(player)} alt={player.name} className="player-photo player-mobile-photo" />
+                                  <div className="player-mobile-identity">
+                                    <h4>{player.name}</h4>
+                                    <div className="player-mobile-subtitle">
+                                      <span className="player-mobile-team">
+                                        <img src={getTeamLogo(player.team)} alt={player.team} className="team-logo" />
+                                        <span>{player.team}</span>
+                                      </span>
+                                      <span className="player-mobile-pos">{player.position === 'P' ? getPitcherRole(player, 2026) : player.position}</span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="player-mobile-stats-grid">
+                                  <div className="player-mobile-stat-card">
+                                    <span>2025 FP</span>
+                                    <strong>{points2025 === undefined || points2025 === null || typeof points2025 !== 'number' || isNaN(points2025) ? 0 : points2025}</strong>
+                                  </div>
+                                  <div className="player-mobile-stat-card">
+                                    <span>2026 FP</span>
+                                    <strong>{points2026 === undefined || points2026 === null || typeof points2026 !== 'number' || isNaN(points2026) ? 0 : points2026}</strong>
+                                  </div>
+                                </div>
+                              </article>
+                            );
+                          })}
+                        </div>
+
+                        <table className="players-table players-table-all players-table-desktop">
+                          <thead>
+                            <tr>
+                              <th>Name</th>
+                              <th>Team</th>
+                              <th>POS</th>
+                              <th
+                                onClick={() => setPlayersSortSeason('2025')}
+                                style={{ cursor: 'pointer' }}
+                                title="Sort by 2025 fantasy points (high to low)"
+                              >
+                                2025 FP {playersSortSeason === '2025' ? '↓' : ''}
+                              </th>
+                              <th
+                                onClick={() => setPlayersSortSeason('2026')}
+                                style={{ cursor: 'pointer' }}
+                                title="Sort by 2026 fantasy points (high to low)"
+                              >
+                                2026 FP {playersSortSeason === '2026' ? '↓' : ''}
+                              </th>
                             </tr>
-                            ))}
-                        </tbody>
-                      </table>
+                          </thead>
+                          <tbody>
+                            {filteredAllPlayers.map((player) => {
+                              const points2025 = fantasyPointsCache[`${player._id}-2025`];
+                              const points2026 = fantasyPointsCache[`${player._id}-2026`];
+
+                              return (
+                                <tr key={player._id} className="clickable-row" onClick={() => setSelectedPlayer(player)}>
+                                  <td data-label="Name">
+                                    <div className="player-name-cell">
+                                      <img src={getPlayerPhoto(player)} alt={player.name} className="player-photo" />
+                                      <span>{player.name}</span>
+                                    </div>
+                                  </td>
+                                  <td data-label="Team">
+                                    <div className="team-cell">
+                                      <img src={getTeamLogo(player.team)} alt={player.team} className="team-logo" />
+                                      <span>{player.team}</span>
+                                    </div>
+                                  </td>
+                                  <td data-label="POS">{player.position === 'P' ? getPitcherRole(player, 2026) : player.position}</td>
+                                  <td data-label="2025 FP">{points2025 === undefined || points2025 === null || typeof points2025 !== 'number' || isNaN(points2025) ? 0 : points2025}</td>
+                                  <td data-label="2026 FP">{points2026 === undefined || points2026 === null || typeof points2026 !== 'number' || isNaN(points2026) ? 0 : points2026}</td>
+                                </tr>
+                              );
+                            })}
+                          </tbody>
+                        </table>
+                      </>
                     )}
                   </div>
                 </div>
@@ -2278,11 +2422,6 @@ function App() {
               </div>
               <div className="my-team-summary">
                 <div className="my-team-total">
-                  <span>Weekly Total:</span>
-                  <strong>{myTeamWeeklyPoints.total}</strong>
-                  {myTeamWeeklyPoints.hasPending && <small>updating...</small>}
-                </div>
-                <div className="my-team-total">
                   <span>Total Points:</span>
                   <strong>{myTeamTotalPoints.total}</strong>
                   {myTeamTotalPoints.hasPending && <small>updating...</small>}
@@ -2325,8 +2464,8 @@ function App() {
                         ].filter(Boolean).join(' ')}
                         onClick={() => slot.player && !isBenchSlot && setSelectedPlayer(slot.player)}
                       >
-                        <td><strong className={isBenchSlot ? 'bench-slot-label' : ''}>{slot.label}</strong></td>
-                        <td>
+                        <td data-label="Slot"><strong className={isBenchSlot ? 'bench-slot-label' : ''}>{slot.label}</strong></td>
+                        <td data-label="Player">
                           {slot.player ? (
                             <div className="player-name-cell">
                               <img src={getPlayerPhoto(slot.player)} alt={slot.player.name} className="player-photo" />
@@ -2336,7 +2475,7 @@ function App() {
                             <span>{isBenchSlot ? 'Empty bench' : 'Open slot'}</span>
                           )}
                         </td>
-                        <td>
+                        <td data-label="Team">
                           {slot.player?.team ? (
                             <div className="team-cell">
                               <img src={getTeamLogo(slot.player.team)} alt={slot.player.team} className="team-logo" />
@@ -2346,8 +2485,8 @@ function App() {
                             <span>—</span>
                           )}
                         </td>
-                        <td>{slot.player?.position || '—'}</td>
-                        <td>
+                        <td data-label="POS">{slot.player?.position || '—'}</td>
+                        <td data-label="Points">
                           {!slot.player
                             ? '—'
                             : fantasyPoints === undefined
@@ -2356,7 +2495,7 @@ function App() {
                                 ? 'N/A'
                                 : fantasyPoints}
                         </td>
-                        <td>
+                        <td data-label="Drop">
                           {!isViewingOwnTeam || !slot.player ? '—' : isBenchSlot ? (
                             <div className="roster-status-cell">
                               {isPendingBenchPlayer ? (
@@ -2486,35 +2625,45 @@ function App() {
                     <tr>
                       <th>Rank</th>
                       <th>Team</th>
-                      <th>Weekly Points Total</th>
                       <th>Total Points</th>
                     </tr>
                   </thead>
                   <tbody>
-                    {standings.map((team) => {
-                      const trophy = team.rank === 1 ? '🏆' : team.rank === 2 ? '🥈' : team.rank === 3 ? '🥉' : '';
-                      const standingsTeamKey = team.userId || team.teamId || `name:${team.teamName || 'Unknown User'}`;
+                    {sortedStandings.map((team, index) => {
+                      const displayRank = index + 1;
+                      const trophy = displayRank === 1 ? '🏆' : displayRank === 2 ? '🥈' : displayRank === 3 ? '🥉' : '';
+                      const teamNameClass = displayRank <= 3
+                        ? `standings-team-name standings-team-name-top-${displayRank}`
+                        : 'standings-team-name';
+                      const matchedOverviewTeam = getOverviewTeamForStandingsRow(team);
+                      const standingsTeamKey = matchedOverviewTeam
+                        ? getStandingsTeamSelectionKey(matchedOverviewTeam)
+                        : getStandingsTeamSelectionKey(team);
                       const isSelected = standingsTeamKey === selectedStandingsTeamKey;
+                      const computedTotals = standingsComputedTotalsByTeamKey.get(standingsTeamKey);
+                      const rowTotalPoints = computedTotals ? computedTotals.total : (team.totalPoints || 0);
+                      const rowHasPending = Boolean(computedTotals?.hasPending);
 
                       return (
                         <tr
-                          key={team.teamId}
+                          key={standingsTeamKey || team.teamId || team.teamName}
                           className={[
-                            team.rank <= 3 ? `standings-top standings-top-${team.rank}` : '',
+                            displayRank <= 3 ? `standings-top standings-top-${displayRank}` : '',
                             'standings-clickable-row',
                             isSelected ? 'standings-selected-row' : ''
                           ].filter(Boolean).join(' ')}
                           onClick={() => setSelectedStandingsTeamKey((prev) => (prev === standingsTeamKey ? '' : standingsTeamKey))}
                         >
-                          <td>
+                          <td data-label="Rank">
                             <span className="standings-rank">
                               {trophy && <span className="standings-trophy">{trophy}</span>}
-                              <span>#{team.rank}</span>
+                              <span>#{displayRank}</span>
                             </span>
                           </td>
-                          <td>{team.teamName}</td>
-                          <td><strong>{team.weeklyPoints ?? 0}</strong></td>
-                          <td><strong>{team.totalPoints}</strong></td>
+                          <td data-label="Team">
+                            <span className={teamNameClass}>{team.teamName}</span>
+                          </td>
+                          <td data-label="Total Points"><strong>{rowHasPending ? 'Loading...' : rowTotalPoints}</strong></td>
                         </tr>
                       );
                     })}
@@ -2544,14 +2693,16 @@ function App() {
                         </thead>
                         <tbody>
                           {selectedStandingsTeamPlayers.map((player, index) => {
-                            const fullPlayer = playersById.get(String(player.playerId || ''));
+                            const fullPlayer = playersById.get(String(player.resolvedPlayerId || player.playerId || ''));
                             const season = fullPlayer ? getLatestSeasonForPlayer(fullPlayer) : null;
-                            const cacheKey = player.playerId && season ? `${player.playerId}-${season}` : null;
+                            const cacheKey = (player.resolvedPlayerId || player.playerId) && season
+                              ? `${player.resolvedPlayerId || player.playerId}-${season}`
+                              : null;
                             const points = cacheKey ? fantasyPointsCache[cacheKey] : null;
 
                             return (
                             <tr key={`${player.playerId}-${index}`}>
-                              <td>
+                              <td data-label="Player">
                                 <div className="player-name-cell">
                                   <img
                                     src={getPlayerPhoto({ name: player.playerName, photoUrl: player.photoUrl || '' })}
@@ -2561,7 +2712,7 @@ function App() {
                                   <span>{player.playerName}</span>
                                 </div>
                               </td>
-                              <td>
+                              <td data-label="Team">
                                 {player.team && player.team !== '—' ? (
                                   <div className="team-cell">
                                     <img src={getTeamLogo(player.team)} alt={player.team} className="team-logo" />
@@ -2571,11 +2722,11 @@ function App() {
                                   <span>—</span>
                                 )}
                               </td>
-                              <td>{player.position}</td>
-                              <td>
+                              <td data-label="Pos">{player.position}</td>
+                              <td data-label="Points">
                                 {!cacheKey ? 'N/A' : points === undefined ? 'Loading...' : points === null ? 'N/A' : points}
                               </td>
-                              <td>{player.isBench ? 'Bench' : 'Active'}</td>
+                              <td data-label="Slot">{player.isBench ? 'Bench' : 'Active'}</td>
                             </tr>
                             );
                           })}
@@ -2590,7 +2741,7 @@ function App() {
         )}
 
         {/* Trades Tab */}
-        {activeTab === 'trades' && (
+        {TRADES_TAB_ENABLED && activeTab === 'trades' && (
           <div className="tab-content trades-broadcast-view">
             <div className="tab-section-header">
               <h2>Trades</h2>
