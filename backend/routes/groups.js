@@ -160,7 +160,8 @@ router.post('/', async (req, res) => {
       inviteCode,
       draftScheduledAt: parsedDraftSchedule.value,
       preferredDraftType: parsedDraftType.value,
-      members: [{ userId: user.userId, username: user.username }]
+      members: [{ userId: user.userId, username: user.username }],
+      draftOrderUserIds: [user.userId]
     });
 
     await group.save();
@@ -212,6 +213,12 @@ router.post('/join', async (req, res) => {
     const alreadyInGroup = group.members.some((m) => m.userId === user.userId);
     if (!alreadyInGroup) {
       group.members.push({ userId: user.userId, username: user.username });
+      if (!Array.isArray(group.draftOrderUserIds)) {
+        group.draftOrderUserIds = [];
+      }
+      if (!group.draftOrderUserIds.includes(user.userId)) {
+        group.draftOrderUserIds.push(user.userId);
+      }
       await group.save();
     }
 
@@ -219,6 +226,73 @@ router.post('/join', async (req, res) => {
   } catch (err) {
     console.error('[GROUPS] join error:', err.message);
     res.status(500).json({ message: 'Failed to join group' });
+  }
+});
+
+// PUT /api/groups/:id/draft-order - update group draft order (owner only)
+router.put('/:id/draft-order', async (req, res) => {
+  try {
+    const user = getUser(req);
+    if (!user) return res.status(401).json({ message: 'Not logged in' });
+
+    const group = await Group.findById(req.params.id);
+    if (!group) return res.status(404).json({ message: 'Group not found' });
+    if (group.ownerUserId !== user.userId) {
+      return res.status(403).json({ message: 'Only the group owner can change draft order' });
+    }
+
+    const requestedOrder = Array.isArray(req.body?.draftOrderUserIds)
+      ? req.body.draftOrderUserIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : null;
+
+    if (!requestedOrder || requestedOrder.length === 0) {
+      return res.status(400).json({ message: 'draftOrderUserIds is required' });
+    }
+
+    const memberIds = (group.members || []).map((member) => String(member.userId));
+    const memberIdSet = new Set(memberIds);
+    const requestedSet = new Set(requestedOrder);
+
+    if (requestedOrder.length !== memberIds.length || requestedSet.size !== memberIds.length) {
+      return res.status(400).json({ message: 'Draft order must include each group member exactly once' });
+    }
+
+    const hasInvalidMember = requestedOrder.some((userId) => !memberIdSet.has(userId));
+    if (hasInvalidMember) {
+      return res.status(400).json({ message: 'Draft order contains a user who is not in the group' });
+    }
+
+    const memberById = new Map((group.members || []).map((member) => [String(member.userId), member]));
+    group.members = requestedOrder
+      .map((userId) => memberById.get(userId))
+      .filter(Boolean);
+    group.draftOrderUserIds = requestedOrder;
+    await group.save();
+
+    const groupId = String(group._id);
+    const setupDrafts = await Draft.find({ groupId, status: 'setup' });
+    for (const draft of setupDrafts) {
+      const draftUserById = new Map((draft.users || []).map((slot) => [String(slot.userId || ''), slot]));
+      const reorderedUsers = requestedOrder
+        .map((userId) => draftUserById.get(userId))
+        .filter(Boolean);
+
+      for (const slot of draft.users || []) {
+        const slotUserId = String(slot.userId || '');
+        if (!requestedSet.has(slotUserId)) {
+          reorderedUsers.push(slot);
+        }
+      }
+
+      draft.users = reorderedUsers;
+      draft.markModified('users');
+      await draft.save();
+    }
+
+    res.json(group);
+  } catch (err) {
+    console.error('[GROUPS] update draft order error:', err.message);
+    res.status(500).json({ message: 'Failed to update draft order' });
   }
 });
 

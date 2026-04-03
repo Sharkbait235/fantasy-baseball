@@ -609,16 +609,34 @@ router.get('/standings', async (req, res) => {
 
     const requestCache = new Map();
     const allPlayerIds = new Set();
+    const allPlayerNames = new Set();
     drafts.forEach((draft) => {
       (draft.users || []).forEach((user) => {
         (user.picks || []).forEach((pick) => {
           if (pick.playerId) allPlayerIds.add(String(pick.playerId));
+          if (pick.playerName) allPlayerNames.add(String(pick.playerName).trim());
         });
       });
     });
 
-    const players = await Player.find({ _id: { $in: [...allPlayerIds] } });
-    const playerMap = new Map(players.map((p) => [String(p._id), p]));
+    const playerQuery = [];
+    if (allPlayerIds.size > 0) {
+      playerQuery.push({ _id: { $in: [...allPlayerIds] } });
+    }
+    if (allPlayerNames.size > 0) {
+      playerQuery.push({ name: { $in: [...allPlayerNames] } });
+    }
+
+    const players = playerQuery.length > 0
+      ? await Player.find({ $or: playerQuery })
+      : [];
+    const playerMapById = new Map(players.map((p) => [String(p._id), p]));
+    const playerMapByName = new Map();
+    for (const player of players) {
+      const nameKey = String(player?.name || '').trim().toLowerCase();
+      if (!nameKey || playerMapByName.has(nameKey)) continue;
+      playerMapByName.set(nameKey, player);
+    }
 
     for (const draft of drafts) {
       for (const user of draft.users || []) {
@@ -627,10 +645,10 @@ router.get('/standings', async (req, res) => {
         const team = teamMap.get(teamId);
         if (!team) continue;
 
-        const benchSet = new Set((user.benchPlayerIds || []).map(String));
         for (const pick of user.picks) {
-          if (benchSet.has(String(pick.playerId))) continue; // skip bench players
-          const player = playerMap.get(String(pick.playerId));
+          const playerId = String(pick.playerId || '');
+          const playerNameKey = String(pick.playerName || '').trim().toLowerCase();
+          const player = playerMapById.get(playerId) || playerMapByName.get(playerNameKey);
           if (!player) continue;
           const season = getLatestSeasonForPlayer(player);
           const points = await getFantasyPointsForPlayerSeason(player, season, requestCache);
@@ -870,7 +888,24 @@ router.post('/from-group', async (req, res) => {
       return res.json(existingGroupDraft);
     }
 
-    const users = group.members.map((m) => ({
+    const orderedMemberIds = Array.isArray(group.draftOrderUserIds)
+      ? group.draftOrderUserIds.map((id) => String(id || '').trim()).filter(Boolean)
+      : [];
+    const groupMembers = Array.isArray(group.members) ? group.members : [];
+    const memberById = new Map(groupMembers.map((member) => [String(member.userId), member]));
+
+    const orderedMembers = [];
+    for (const userId of orderedMemberIds) {
+      const member = memberById.get(userId);
+      if (member) orderedMembers.push(member);
+    }
+    for (const member of groupMembers) {
+      if (!orderedMemberIds.includes(String(member.userId))) {
+        orderedMembers.push(member);
+      }
+    }
+
+    const users = orderedMembers.map((m) => ({
       name: m.username,
       userId: m.userId,
       picks: []

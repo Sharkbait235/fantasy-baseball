@@ -47,6 +47,99 @@ async function resolveMlbPlayerId(player) {
   return search.data?.people?.[0]?.id || null;
 }
 
+// Batch endpoint: Get fantasy points for all players for a season
+router.get('/fantasy-points/batch', async (req, res) => {
+  try {
+    const season = Number(req.query.season);
+    if (!Number.isFinite(season)) {
+      return res.status(400).json({ message: 'season query param is required (e.g. ?season=2025)' });
+    }
+
+    const players = await Player.find({});
+    const results = [];
+
+    async function calculateFantasyPoints(player) {
+      const mlbPlayerId = await resolveMlbPlayerId(player);
+      if (!mlbPlayerId) return null;
+      const isPitcher = String(player.position || '').toUpperCase().includes('P');
+      const group = isPitcher ? 'pitching' : 'hitting';
+      const response = await axios.get(`https://statsapi.mlb.com/api/v1/people/${mlbPlayerId}/stats`, {
+        params: { stats: 'gameLog', season, group },
+        timeout: 20000
+      });
+      const rawSplits = response.data?.stats?.[0]?.splits || [];
+      let totalPoints = 0;
+      let totalHomeRuns = 0;
+      let totalWalkOffHomeRuns = 0;
+      let totalStrikeoutsThrown = 0;
+      for (const split of rawSplits) {
+        const stat = split?.stat || {};
+        if (isPitcher) {
+          const strikeoutsThrown = Math.max(0, Number(stat?.strikeOuts) || 0);
+          totalStrikeoutsThrown += strikeoutsThrown;
+          totalPoints += strikeoutsThrown * 0.5;
+        } else {
+          const homeRuns = Math.max(0, Number(stat?.homeRuns) || 0);
+          const walkOffHomeRuns = resolveWalkOffHomeRuns(stat, homeRuns);
+          const hrPoints = getTieredHomeRunPoints(homeRuns);
+          const walkOffBonusPoints = walkOffHomeRuns * 3;
+          totalHomeRuns += homeRuns;
+          totalWalkOffHomeRuns += walkOffHomeRuns;
+          totalPoints += hrPoints + walkOffBonusPoints;
+        }
+      }
+
+      return {
+        playerId: player._id,
+        mlbPlayerId,
+        season,
+        role: isPitcher ? 'pitcher' : 'hitter',
+        totals: {
+          fantasyPoints: totalPoints,
+          homeRuns: totalHomeRuns,
+          walkOffHomeRuns: totalWalkOffHomeRuns,
+          strikeoutsThrown: totalStrikeoutsThrown
+        }
+      };
+    }
+
+    for (const player of players) {
+      const cached = player.fantasyPointsBySeason && player.fantasyPointsBySeason[season];
+      if (cached && typeof cached.fantasyPoints === 'number') {
+        results.push({
+          playerId: player._id,
+          mlbPlayerId: player.mlbPlayerId,
+          season,
+          role: String(player.position || '').toUpperCase().includes('P') ? 'pitcher' : 'hitter',
+          totals: cached
+        });
+        continue;
+      }
+
+      const points = await calculateFantasyPoints(player);
+      if (points) {
+        player.fantasyPointsBySeason = player.fantasyPointsBySeason || {};
+        player.fantasyPointsBySeason[season] = points.totals;
+        await player.save();
+        results.push(points);
+      } else {
+        results.push({
+          playerId: player._id,
+          mlbPlayerId: player.mlbPlayerId,
+          season,
+          role: String(player.position || '').toUpperCase().includes('P') ? 'pitcher' : 'hitter',
+          totals: { fantasyPoints: 0, homeRuns: 0, walkOffHomeRuns: 0, strikeoutsThrown: 0 }
+        });
+      }
+    }
+
+    res.json(results);
+  } catch (err) {
+    console.error('[API] Error in batch fantasy points:', err.message);
+    res.status(500).json({ message: err.message || 'Failed to calculate batch fantasy points' });
+  }
+});
+
 // Get all players (sorted by home runs)
 router.get('/', async (req, res) => {
   try {

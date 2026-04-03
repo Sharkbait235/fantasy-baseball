@@ -41,6 +41,11 @@ const playerSchema = new mongoose.Schema({
     type: Boolean,
     default: true
   },
+  // Cache of fantasy points by season: { [season]: { fantasyPoints, homeRuns, ... } }
+  fantasyPointsBySeason: {
+    type: mongoose.Schema.Types.Mixed,
+    default: {}
+  },
   createdAt: {
     type: Date,
     default: Date.now
