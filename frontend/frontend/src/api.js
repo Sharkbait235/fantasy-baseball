@@ -1,11 +1,37 @@
 const REMOTE_API_BASE = 'https://fantasy-baseball-o8ta.onrender.com/api';
 
+function isLocalOrPrivateHost(hostname) {
+  if (!hostname) return false;
+
+  if (hostname === 'localhost' || hostname === '127.0.0.1' || hostname === '0.0.0.0') {
+    return true;
+  }
+
+  if (hostname.endsWith('.local')) return true;
+  if (/^10\./.test(hostname)) return true;
+  if (/^192\.168\./.test(hostname)) return true;
+
+  const match172 = hostname.match(/^172\.(\d{1,3})\./);
+  if (match172) {
+    const octet = Number(match172[1]);
+    if (octet >= 16 && octet <= 31) return true;
+  }
+
+  return false;
+}
+
 function getLocalApiBase() {
   if (typeof window === 'undefined') {
     return REMOTE_API_BASE;
   }
 
   const hostname = window.location.hostname || 'localhost';
+
+  // Keep production and any HTTPS host on the secure remote API to avoid mixed-content blocks.
+  if (!isLocalOrPrivateHost(hostname) || window.location.protocol === 'https:') {
+    return REMOTE_API_BASE;
+  }
+
   return `http://${hostname}/api`;
 }
 
