@@ -1,4 +1,10 @@
 const REMOTE_API_BASE = 'https://fantasy-baseball-o8ta.onrender.com/api';
+const LOCAL_API_PORT = '3001';
+
+function getConfiguredApiBase() {
+  const configured = process.env.REACT_APP_API_BASE;
+  return configured && typeof configured === 'string' ? configured.trim() : '';
+}
 
 function isLocalOrPrivateHost(hostname) {
   if (!hostname) return false;
@@ -21,6 +27,11 @@ function isLocalOrPrivateHost(hostname) {
 }
 
 function getLocalApiBase() {
+  const configuredBase = getConfiguredApiBase();
+  if (configuredBase) {
+    return configuredBase;
+  }
+
   if (typeof window === 'undefined') {
     return REMOTE_API_BASE;
   }
@@ -32,7 +43,7 @@ function getLocalApiBase() {
     return REMOTE_API_BASE;
   }
 
-  return `http://${hostname}/api`;
+  return `http://${hostname}:${LOCAL_API_PORT}/api`;
 }
 
 function rewriteApiUrl(url) {

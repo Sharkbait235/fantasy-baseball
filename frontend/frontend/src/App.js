@@ -4,7 +4,7 @@ import './App.css';
 import Draft from './Draft';
 import Login from './Login';
 
-const FANTASY_POINTS_CACHE_KEY = 'fantasyPointsCache-v2-20260328';
+const FANTASY_POINTS_CACHE_KEY = 'fantasyPointsCache-v4-20260406-shohei-hitter';
 const TRADES_TAB_ENABLED = false;
 
 function App() {
@@ -16,7 +16,7 @@ function App() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const [backendStatus, setBackendStatus] = useState('checking...');
-  const [myTeam, setMyTeam] = useState({ userId: '', userName: '', picks: [], groupId: '', benchPlayerIds: [] });
+  const [myTeam, setMyTeam] = useState({ userId: '', userName: '', picks: [], groupId: '', benchPlayerIds: [], dropsUsed: 0, dropsRemaining: 1 });
   const [pendingSwapBenchPlayerId, setPendingSwapBenchPlayerId] = useState('');
   const [swapLoading, setSwapLoading] = useState(false);
   const [myTeamGroups, setMyTeamGroups] = useState([]);
@@ -174,7 +174,8 @@ function App() {
   };
 
   const isPitcherPosition = (position) => String(position || '').toUpperCase().includes('P');
-  const MAX_BENCH_SLOTS = 1;
+  const HITTER_POSITION_ACCEPTS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF', 'DH'];
+  const MAX_BENCH_SLOTS = 0;
 
   function inferPitcherRosterRole(player, preferredSeason = 2026) {
     if (!player) return 'RP';
@@ -285,11 +286,11 @@ function App() {
       { key: 'LF', label: 'LF', accepts: ['LF', 'OF'], isBench: false },
       { key: 'CF', label: 'CF', accepts: ['CF', 'OF'], isBench: false },
       { key: 'RF', label: 'RF', accepts: ['RF', 'OF'], isBench: false },
-      { key: 'DH', label: 'DH', accepts: ['DH'], isBench: false },
+      { key: 'DH1', label: 'DH', accepts: HITTER_POSITION_ACCEPTS, isBench: false },
+      { key: 'DH2', label: 'DH', accepts: HITTER_POSITION_ACCEPTS, isBench: false },
       { key: 'SP1', label: 'SP1', accepts: ['SP'], isBench: false },
       { key: 'SP2', label: 'SP2', accepts: ['SP'], isBench: false },
-      { key: 'RP', label: 'RP', accepts: ['RP'], isBench: false },
-      { key: 'BN1', label: 'BN', accepts: ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF', 'DH'], isBench: true }
+      { key: 'RP', label: 'RP', accepts: ['RP'], isBench: false }
     ].map((slot) => ({ ...slot, player: null, round: null }));
 
     for (const pick of picks) {
@@ -742,7 +743,7 @@ function App() {
     localStorage.removeItem('username');
     localStorage.removeItem('userId');
     setAuth(null);
-    setMyTeam({ userId: '', userName: '', picks: [], groupId: '' });
+    setMyTeam({ userId: '', userName: '', picks: [], groupId: '', benchPlayerIds: [], dropsUsed: 0, dropsRemaining: 1 });
   };
 
   const fetchMyTeam = useCallback(async () => {
@@ -753,7 +754,7 @@ function App() {
       });
       if (res.ok) {
         const data = await res.json();
-        setMyTeam({ userId: auth.userId, userName: data.username, picks: data.picks, groupId: '' });
+        setMyTeam({ userId: auth.userId, userName: data.username, picks: data.picks, groupId: '', benchPlayerIds: [], dropsUsed: 0, dropsRemaining: 1 });
       }
     } catch (err) {
       console.error('Failed to fetch my team:', err);
@@ -793,7 +794,7 @@ function App() {
     if (!auth?.token || !groupId) {
       setGroupPickedPlayerIds([]);
       setGroupPlayerOwnerById({});
-      setMyTeam({ userId: '', userName: '', picks: [], groupId: '' });
+      setMyTeam({ userId: '', userName: '', picks: [], groupId: '', benchPlayerIds: [], dropsUsed: 0, dropsRemaining: 1 });
       return;
     }
 
@@ -827,7 +828,9 @@ function App() {
         userName: selectedTeam?.username || auth?.username || '',
         picks: dedupePicksByPlayerId(selectedTeam?.picks || []),
         groupId,
-        benchPlayerIds: [...new Set(selectedTeam?.benchPlayerIds || [])].slice(0, MAX_BENCH_SLOTS)
+        benchPlayerIds: [...new Set(selectedTeam?.benchPlayerIds || [])].slice(0, MAX_BENCH_SLOTS),
+        dropsUsed: Math.max(0, Number(selectedTeam?.dropsUsed) || 0),
+        dropsRemaining: Math.max(0, Number(selectedTeam?.dropsRemaining ?? 1))
       });
 
       if (!selectedTeam) {
@@ -836,7 +839,7 @@ function App() {
     } catch (err) {
       setGroupPickedPlayerIds([]);
       setGroupPlayerOwnerById({});
-      setMyTeam({ userId: '', userName: '', picks: [], groupId, benchPlayerIds: [] });
+      setMyTeam({ userId: '', userName: '', picks: [], groupId, benchPlayerIds: [], dropsUsed: 0, dropsRemaining: 1 });
       setMyTeamSelectionMessage(err.message || 'Failed to load group teams');
     }
   }, [auth?.token, auth?.userId, auth?.username]);
@@ -892,12 +895,20 @@ function App() {
 
   const handleDropPlayer = async (player) => {
     if (!auth?.token || !player?._id) return;
+    if (!selectedMyTeamGroupId) {
+      alert('Select a group before dropping a player.');
+      return;
+    }
+    if ((Number(myTeam.dropsRemaining) || 0) <= 0) {
+      alert('You already used your one allowed drop for this group.');
+      return;
+    }
 
-    const confirmed = window.confirm(`Drop ${player.name} from your roster?`);
+    const confirmed = window.confirm(`Drop ${player.name} from your roster? This cannot be undone and uses your only drop for this group.`);
     if (!confirmed) return;
 
     try {
-      const res = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/drafts/my-team/${player._id}`, {
+      const res = await fetch(`https://fantasy-baseball-o8ta.onrender.com/api/drafts/my-team/${player._id}?groupId=${encodeURIComponent(selectedMyTeamGroupId)}`, {
         method: 'DELETE',
         headers: { Authorization: `Bearer ${auth.token}` }
       });
@@ -907,6 +918,21 @@ function App() {
         throw new Error(data?.message || 'Failed to drop player');
       }
 
+      const droppedPlayerId = String(player._id);
+
+      // Optimistically update local state so Players tab reflects availability immediately.
+      setGroupPickedPlayerIds((prev) => prev.filter((id) => String(id) !== droppedPlayerId));
+      setGroupPlayerOwnerById((prev) => {
+        const next = { ...prev };
+        delete next[droppedPlayerId];
+        return next;
+      });
+
+      setMyTeam((prev) => ({
+        ...prev,
+        picks: (prev.picks || []).filter((pick) => String(pick?.playerId || '') !== droppedPlayerId)
+      }));
+
       if (selectedMyTeamGroupId) {
         await fetchGroupTeamsForMyTeam(selectedMyTeamGroupId);
       } else {
@@ -914,7 +940,9 @@ function App() {
           ...prev,
           userId: prev.userId || auth?.userId || '',
           userName: data.username || prev.userName,
-          picks: data.picks || []
+          picks: data.picks || [],
+          dropsUsed: Math.max(0, Number(data?.dropsUsed) || 0),
+          dropsRemaining: Math.max(0, Number(data?.dropsRemaining ?? prev.dropsRemaining ?? 1))
         }));
       }
       fetchTradeTeams();
@@ -1206,10 +1234,53 @@ function App() {
     const normalizedPosition = normalizeRosterPosition(playerOrPosition);
     if (!normalizedPosition) return false;
 
-    return myTeamRoster.slots.some(
-      (slot) => !slot.player && (slot.isBench || slot.accepts.includes(normalizedPosition))
-    );
-  }, [myTeamRoster, normalizeRosterPosition]);
+    const activeSlotTemplate = myTeamRoster.slots.filter((slot) => !slot.isBench);
+    const currentPositions = (myTeam.picks || [])
+      .map((pick) => {
+        const playerId = String(pick?.playerId || '').trim();
+        const livePlayer = playersById.get(playerId);
+        return normalizeRosterPosition(livePlayer || pick?.position || '');
+      })
+      .filter(Boolean);
+
+    const allPositions = [...currentPositions, normalizedPosition];
+    if (allPositions.length > activeSlotTemplate.length) return false;
+
+    const slotOptionsByPosition = allPositions.map((position) => {
+      const options = [];
+      for (let slotIdx = 0; slotIdx < activeSlotTemplate.length; slotIdx++) {
+        if ((activeSlotTemplate[slotIdx].accepts || []).includes(position)) {
+          options.push(slotIdx);
+        }
+      }
+      return options;
+    });
+
+    const assignedPositionBySlot = new Array(activeSlotTemplate.length).fill(-1);
+
+    const tryAssign = (positionIdx, seenSlots) => {
+      for (const slotIdx of slotOptionsByPosition[positionIdx]) {
+        if (seenSlots[slotIdx]) continue;
+        seenSlots[slotIdx] = true;
+
+        if (assignedPositionBySlot[slotIdx] === -1 || tryAssign(assignedPositionBySlot[slotIdx], seenSlots)) {
+          assignedPositionBySlot[slotIdx] = positionIdx;
+          return true;
+        }
+      }
+      return false;
+    };
+
+    for (let positionIdx = 0; positionIdx < slotOptionsByPosition.length; positionIdx++) {
+      if (slotOptionsByPosition[positionIdx].length === 0) return false;
+      const seenSlots = new Array(activeSlotTemplate.length).fill(false);
+      if (!tryAssign(positionIdx, seenSlots)) {
+        return false;
+      }
+    }
+
+    return true;
+  }, [myTeam.picks, myTeamRoster.slots, normalizeRosterPosition, playersById]);
 
   const pendingBenchPlayer = useMemo(() => {
     if (!pendingSwapBenchPlayerId) return null;
@@ -1218,6 +1289,56 @@ function App() {
     );
     return pendingSlot?.player || null;
   }, [myTeamRoster, pendingSwapBenchPlayerId]);
+
+  const myTeamPickIdSet = useMemo(() => {
+    return new Set((myTeam.picks || []).map((pick) => String(pick?.playerId || '')));
+  }, [myTeam.picks]);
+
+  const groupPickedPlayerIdSet = useMemo(() => {
+    return new Set((groupPickedPlayerIds || []).map((id) => String(id || '')));
+  }, [groupPickedPlayerIds]);
+
+  const getPickupButtonState = useCallback((player) => {
+    const playerId = String(player?._id || '');
+    const ownerName = groupPlayerOwnerById[playerId] || 'Another team';
+    const isOnMyTeam = myTeamPickIdSet.has(playerId);
+    const isPickedInGroup = groupPickedPlayerIdSet.has(playerId);
+    const isPickupInProgress = pickupLoadingPlayerId === playerId;
+
+    if (!selectedMyTeamGroupId) {
+      return { disabled: true, label: 'Select Group', note: 'Choose a group to manage pickups.' };
+    }
+
+    if (isPickupInProgress) {
+      return { disabled: true, label: 'Picking Up...', note: '' };
+    }
+
+    if (isOnMyTeam) {
+      return { disabled: true, label: 'On My Team', note: '' };
+    }
+
+    if (isPickedInGroup) {
+      return { disabled: true, label: 'Unavailable', note: `Owned by ${ownerName}` };
+    }
+
+    if (!canPickupInCurrentGroup) {
+      return { disabled: true, label: 'Locked', note: 'Pickups unlock after draft time.' };
+    }
+
+    if (!hasOpenSlotForPosition(player)) {
+      return { disabled: true, label: 'Roster Full', note: 'Drop a player to open a slot.' };
+    }
+
+    return { disabled: false, label: 'Pick Up', note: '' };
+  }, [
+    canPickupInCurrentGroup,
+    groupPickedPlayerIdSet,
+    groupPlayerOwnerById,
+    hasOpenSlotForPosition,
+    myTeamPickIdSet,
+    pickupLoadingPlayerId,
+    selectedMyTeamGroupId
+  ]);
 
   const selectedTradePartner = useMemo(() => {
     return tradeTeams.otherTeams.find((team) => team.userId === selectedTradePartnerId) || null;
@@ -1916,7 +2037,7 @@ function App() {
   useEffect(() => {
     if (activeTab !== 'my-team') return;
     if (!selectedMyTeamGroupId) {
-      setMyTeam({ userId: '', userName: '', picks: [], groupId: '' });
+      setMyTeam({ userId: '', userName: '', picks: [], groupId: '', benchPlayerIds: [], dropsUsed: 0, dropsRemaining: 1 });
       return;
     }
 
@@ -1951,6 +2072,30 @@ function App() {
       fetchInbox();
     }
   }, [auth?.token, fetchInbox, selectedMyTeamGroupId]);
+
+  // Refresh all group-dependent data when group selection changes
+  useEffect(() => {
+    if (!auth?.token) return;
+    if (!selectedMyTeamGroupId) return;
+
+    const refreshGroupData = async () => {
+      try {
+        // Refresh all tab data for the selected group
+        await Promise.all([
+          fetchGroupTeamsForMyTeam(selectedMyTeamGroupId), // my-team and players tabs
+          fetchStandings(),                                 // standings tab
+          fetchStandingsTeams(),                            // standings tab
+          fetchTradeTeams(),                                // trades tab
+          fetchInbox()                                      // trades tab
+        ]);
+        console.log('[DEBUG] Group changed: refreshed all data for group', selectedMyTeamGroupId);
+      } catch (err) {
+        console.error('[DEBUG] Error refreshing group data:', err);
+      }
+    };
+
+    refreshGroupData();
+  }, [selectedMyTeamGroupId, auth?.token, fetchGroupTeamsForMyTeam, fetchStandings, fetchStandingsTeams, fetchTradeTeams, fetchInbox]);
 
   useEffect(() => {
     setSelectedTradePartnerId('');
@@ -2035,6 +2180,40 @@ function App() {
       setInboxError(err.message || `Failed to ${action} trade`);
     }
   };
+
+  // Refresh all data when user logs in
+  useEffect(() => {
+    if (!auth?.token) return;
+
+    const refreshAllData = async () => {
+      try {
+        // Clear stale fantasy points cache from previous user
+        setFantasyPointsCache({});
+
+        // Fetch fresh players list from backend
+        const playersRes = await fetch('https://fantasy-baseball-o8ta.onrender.com/api/players');
+        if (playersRes.ok) {
+          const playersData = await playersRes.json();
+          if (Array.isArray(playersData)) {
+            setPlayers(playersData);
+            setError(null);
+          }
+        }
+
+        // Fetch user's groups and teams
+        await fetchMyTeamGroups();
+
+        // Fetch user's team
+        await fetchMyTeam();
+
+        console.log('[DEBUG] Login refresh complete: players, groups, and teams updated');
+      } catch (err) {
+        console.error('[DEBUG] Error during login refresh:', err);
+      }
+    };
+
+    refreshAllData();
+  }, [auth?.token]);
 
   useEffect(() => {
     // First, check if backend is running
@@ -2190,6 +2369,22 @@ function App() {
           <div className="tab-content players-broadcast-view">
             <div className="tab-section-header players-tab-header">
               <h2 className="players-tab-title">Players</h2>
+              <label className="tab-group-filter">
+                <span>Group</span>
+                <select
+                  value={selectedMyTeamGroupId}
+                  onChange={(e) => setSelectedMyTeamGroupId(e.target.value)}
+                  disabled={myTeamGroupsLoading || myTeamGroups.length === 0}
+                >
+                  {myTeamGroups.length === 0 ? (
+                    <option value="">No groups</option>
+                  ) : (
+                    myTeamGroups.map((group) => (
+                      <option value={group._id} key={group._id}>{group.name}</option>
+                    ))
+                  )}
+                </select>
+              </label>
             </div>
             {loading && <p className="loading">Loading players...</p>}
             {error && (
@@ -2278,11 +2473,16 @@ function App() {
                           {filteredAllPlayers.map((player) => {
                             const points2025 = fantasyPointsCache[`${player._id}-2025`];
                             const points2026 = fantasyPointsCache[`${player._id}-2026`];
+                            const pickupState = getPickupButtonState(player);
+                            const playerId = String(player?._id || '');
+                            const isDraftedByOtherTeam = !!selectedMyTeamGroupId
+                              && groupPickedPlayerIdSet.has(playerId)
+                              && !myTeamPickIdSet.has(playerId);
 
                             return (
                               <article
                                 key={player._id}
-                                className="player-mobile-card clickable-row"
+                                className={`player-mobile-card clickable-row ${isDraftedByOtherTeam ? 'player-unavailable' : ''}`}
                                 onClick={() => setSelectedPlayer(player)}
                               >
                                 <div className="player-mobile-card-header">
@@ -2309,6 +2509,23 @@ function App() {
                                     <strong>{points2026 === undefined || points2026 === null || typeof points2026 !== 'number' || isNaN(points2026) ? 0 : points2026}</strong>
                                   </div>
                                 </div>
+
+                                <div className="player-mobile-action">
+                                  <button
+                                    type="button"
+                                    className="pickup-player-btn"
+                                    disabled={pickupState.disabled}
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      if (!pickupState.disabled) {
+                                        handlePickupPlayer(player);
+                                      }
+                                    }}
+                                  >
+                                    {pickupState.label}
+                                  </button>
+                                  {pickupState.note ? <small className="players-action-note">{pickupState.note}</small> : null}
+                                </div>
                               </article>
                             );
                           })}
@@ -2334,15 +2551,25 @@ function App() {
                               >
                                 2026 FP {playersSortSeason === '2026' ? '↓' : ''}
                               </th>
+                              <th>Action</th>
                             </tr>
                           </thead>
                           <tbody>
                             {filteredAllPlayers.map((player) => {
                               const points2025 = fantasyPointsCache[`${player._id}-2025`];
                               const points2026 = fantasyPointsCache[`${player._id}-2026`];
+                              const pickupState = getPickupButtonState(player);
+                              const playerId = String(player?._id || '');
+                              const isDraftedByOtherTeam = !!selectedMyTeamGroupId
+                                && groupPickedPlayerIdSet.has(playerId)
+                                && !myTeamPickIdSet.has(playerId);
 
                               return (
-                                <tr key={player._id} className="clickable-row" onClick={() => setSelectedPlayer(player)}>
+                                <tr
+                                  key={player._id}
+                                  className={`clickable-row ${isDraftedByOtherTeam ? 'player-unavailable' : ''}`}
+                                  onClick={() => setSelectedPlayer(player)}
+                                >
                                   <td data-label="Name">
                                     <div className="player-name-cell">
                                       <img src={getPlayerPhoto(player)} alt={player.name} className="player-photo" />
@@ -2358,6 +2585,22 @@ function App() {
                                   <td data-label="POS">{player.position === 'P' ? getPitcherRole(player, 2026) : player.position}</td>
                                   <td data-label="2025 FP">{points2025 === undefined || points2025 === null || typeof points2025 !== 'number' || isNaN(points2025) ? 0 : points2025}</td>
                                   <td data-label="2026 FP">{points2026 === undefined || points2026 === null || typeof points2026 !== 'number' || isNaN(points2026) ? 0 : points2026}</td>
+                                  <td data-label="Action" className="players-action-cell">
+                                    <button
+                                      type="button"
+                                      className="pickup-player-btn"
+                                      disabled={pickupState.disabled}
+                                      onClick={(e) => {
+                                        e.stopPropagation();
+                                        if (!pickupState.disabled) {
+                                          handlePickupPlayer(player);
+                                        }
+                                      }}
+                                    >
+                                      {pickupState.label}
+                                    </button>
+                                    {pickupState.note ? <small className="players-action-note">{pickupState.note}</small> : null}
+                                  </td>
                                 </tr>
                               );
                             })}
@@ -2426,6 +2669,10 @@ function App() {
                   <strong>{myTeamTotalPoints.total}</strong>
                   {myTeamTotalPoints.hasPending && <small>updating...</small>}
                 </div>
+                  <div className="my-team-total">
+                    <span>Drops Left:</span>
+                    <strong>{Math.max(0, Number(myTeam.dropsRemaining) || 0)}</strong>
+                  </div>
               </div>
             </div>
             <div className="my-team-roster">
@@ -2449,9 +2696,11 @@ function App() {
                     const isPendingBenchPlayer = pendingSwapBenchPlayerId && pendingSwapBenchPlayerId === slot.player?._id;
                     const pendingBenchPosition = normalizeRosterPosition(pendingBenchPlayer);
                     const activePosition = normalizeRosterPosition(slot.player);
+                    const isDhTargetSlot = String(slot.label || '').toUpperCase() === 'DH';
                     const isSwapTargetCompatible = pendingSwapBenchPlayerId
                       ? (
                         activePosition === pendingBenchPosition
+                        || (isDhTargetSlot && pendingBenchPosition && !isPitcherPosition(pendingBenchPosition))
                       )
                       : false;
 
@@ -2519,6 +2768,7 @@ function App() {
                               <button
                                 type="button"
                                 className="drop-player-btn"
+                                disabled={(Number(myTeam.dropsRemaining) || 0) <= 0}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleDropPlayer(slot.player);
@@ -2545,6 +2795,7 @@ function App() {
                               <button
                                 type="button"
                                 className="drop-player-btn"
+                                disabled={(Number(myTeam.dropsRemaining) || 0) <= 0}
                                 onClick={(e) => {
                                   e.stopPropagation();
                                   handleDropPlayer(slot.player);
@@ -2563,7 +2814,7 @@ function App() {
 
               {pendingSwapBenchPlayerId && (
                 <div className="swap-pending-notice">
-                  Select an active player in the same position to swap.
+                  Select an active player in a compatible position to swap.
                   <button type="button" onClick={() => setPendingSwapBenchPlayerId('')}>Cancel</button>
                 </div>
               )}
@@ -2677,6 +2928,9 @@ function App() {
                   <div className="standings-overview-panel">
                     <div className="standings-overview-header">
                       <h3>{selectedStandingsTeam.username} Team Overview</h3>
+                      <div className="standings-overview-meta">
+                        <span>Owner: {selectedStandingsTeam.ownerUsername || selectedStandingsTeam.username || 'Unknown'}</span>
+                      </div>
                     </div>
                     {selectedStandingsTeamPlayers.length === 0 ? (
                       <p className="no-players">No players on this team yet.</p>

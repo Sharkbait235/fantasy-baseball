@@ -631,6 +631,26 @@
   background-color: #fafbff;
 }
 
+.players-table tbody tr.player-unavailable,
+.player-mobile-card.player-unavailable {
+  background: #f3f5f9 !important;
+  border-color: #d5dbe6 !important;
+  opacity: 0.72;
+}
+
+.players-table tbody tr.player-unavailable:hover,
+.player-mobile-card.player-unavailable:hover {
+  box-shadow: none;
+  background: #edf1f7 !important;
+}
+
+.players-table tbody tr.player-unavailable .player-photo,
+.players-table tbody tr.player-unavailable .team-logo,
+.player-mobile-card.player-unavailable .player-photo,
+.player-mobile-card.player-unavailable .team-logo {
+  filter: grayscale(100%);
+}
+
 .players-columns .players-table th:first-child,
 .players-columns .players-table td:first-child {
   text-align: center;
@@ -918,17 +938,17 @@
 
 .players-columns .players-table-all th:nth-child(1),
 .players-columns .players-table-all td:nth-child(1) {
-  width: 44% !important;
+  width: 42% !important;
 }
 
 .players-columns .players-table-all th:nth-child(2),
 .players-columns .players-table-all td:nth-child(2) {
-  width: 14% !important;
+  width: 13% !important;
 }
 
 .players-columns .players-table-all th:nth-child(3),
 .players-columns .players-table-all td:nth-child(3) {
-  width: 8% !important;
+  width: 7% !important;
 }
 
 .players-columns .players-table-all th:nth-child(4),
@@ -940,7 +960,22 @@
 
 .players-columns .players-table-all th:nth-child(6),
 .players-columns .players-table-all td:nth-child(6) {
-  width: 14% !important;
+  width: 18% !important;
+}
+
+@media (min-width: 769px) {
+  .players-table-desktop .pickup-player-btn {
+    width: auto;
+    min-width: 110px;
+    max-width: 100%;
+    white-space: nowrap;
+    overflow-wrap: normal;
+    padding: 0.42rem 0.7rem;
+  }
+
+  .players-table-desktop .players-action-cell {
+    align-items: center;
+  }
 }
 
 .players-columns .players-table-position th:nth-child(4),
@@ -1204,6 +1239,23 @@
   background: #f5f7fb;
   color: #8f98b3;
   cursor: not-allowed;
+}
+
+.players-action-cell {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 0.26rem;
+}
+
+.players-action-note {
+  display: block;
+  color: #607398;
+  font-size: 0.68rem;
+  line-height: 1.2;
+  font-weight: 700;
+  text-align: center;
 }
 
 .player-modal-overlay {
@@ -1531,6 +1583,9 @@
 .player-mobile-action {
   width: 100%;
   min-height: 2.3rem;
+  display: flex;
+  flex-direction: column;
+  gap: 0.35rem;
 }
 
 .players-list-scroll .players-table thead th {

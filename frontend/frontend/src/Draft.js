@@ -3,7 +3,7 @@ import './Draft.css';
 
 const DRAFT_FANTASY_POINTS_2025_CACHE_KEY = 'draftFantasyPoints2025Cache-v1-20260328';
 
-const HITTER_BENCH_ACCEPTS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF', 'DH'];
+const HITTER_POSITION_ACCEPTS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF', 'DH'];
 
 const DRAFT_ROSTER_SLOT_TEMPLATE = [
   { key: 'C', accepts: ['C'], isBench: false },
@@ -14,11 +14,11 @@ const DRAFT_ROSTER_SLOT_TEMPLATE = [
   { key: 'LF', accepts: ['LF', 'OF'], isBench: false },
   { key: 'CF', accepts: ['CF', 'OF'], isBench: false },
   { key: 'RF', accepts: ['RF', 'OF'], isBench: false },
-  { key: 'DH', accepts: ['DH'], isBench: false },
+  { key: 'DH1', accepts: HITTER_POSITION_ACCEPTS, isBench: false },
+  { key: 'DH2', accepts: HITTER_POSITION_ACCEPTS, isBench: false },
   { key: 'SP1', accepts: ['SP'], isBench: false },
   { key: 'SP2', accepts: ['SP'], isBench: false },
-  { key: 'RP', accepts: ['RP'], isBench: false },
-  { key: 'BN1', accepts: HITTER_BENCH_ACCEPTS, isBench: true }
+  { key: 'RP', accepts: ['RP'], isBench: false }
 ];
 
 const TRACKED_STATS = [
