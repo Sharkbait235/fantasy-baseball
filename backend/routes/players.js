@@ -61,7 +61,10 @@ router.get('/fantasy-points/batch', async (req, res) => {
     async function calculateFantasyPoints(player) {
       const mlbPlayerId = await resolveMlbPlayerId(player);
       if (!mlbPlayerId) return null;
-      const isPitcher = String(player.position || '').toUpperCase().includes('P');
+      // Special case: Shohei Ohtani in 2026 is hitter-only
+      const isShohei2026 = season === 2026 && /shohei ohtani/i.test(player.name);
+      let isPitcher = String(player.position || '').toUpperCase().includes('P');
+      if (isShohei2026) isPitcher = false;
       const group = isPitcher ? 'pitching' : 'hitting';
       const response = await axios.get(`https://statsapi.mlb.com/api/v1/people/${mlbPlayerId}/stats`, {
         params: { stats: 'gameLog', season, group },
@@ -104,18 +107,8 @@ router.get('/fantasy-points/batch', async (req, res) => {
     }
 
     for (const player of players) {
-      const cached = player.fantasyPointsBySeason && player.fantasyPointsBySeason[season];
-      if (cached && typeof cached.fantasyPoints === 'number') {
-        results.push({
-          playerId: player._id,
-          mlbPlayerId: player.mlbPlayerId,
-          season,
-          role: String(player.position || '').toUpperCase().includes('P') ? 'pitcher' : 'hitter',
-          totals: cached
-        });
-        continue;
-      }
-
+      // Always recompute batch totals so the UI reflects current MLB game logs.
+      // Cached values are still updated/persisted, but not trusted as the response source.
       const points = await calculateFantasyPoints(player);
       if (points) {
         player.fantasyPointsBySeason = player.fantasyPointsBySeason || {};
@@ -249,7 +242,10 @@ router.get('/:id/fantasy-points', async (req, res) => {
       return res.status(404).json({ message: 'Official MLB player id not found for this player' });
     }
 
-    const isPitcher = String(player.position || '').toUpperCase().includes('P');
+    // Special case: Shohei Ohtani in 2026 is hitter-only
+    const isShohei2026 = season === 2026 && /shohei ohtani/i.test(player.name);
+    let isPitcher = String(player.position || '').toUpperCase().includes('P');
+    if (isShohei2026) isPitcher = false;
     const group = isPitcher ? 'pitching' : 'hitting';
 
     const response = await axios.get(`https://statsapi.mlb.com/api/v1/people/${mlbPlayerId}/stats`, {

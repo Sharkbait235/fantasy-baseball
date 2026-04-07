@@ -20,7 +20,7 @@ function getUser(req) {
   }
 }
 
-const HITTER_BENCH_ACCEPTS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF', 'DH'];
+const HITTER_POSITION_ACCEPTS = ['C', '1B', '2B', '3B', 'SS', 'LF', 'CF', 'RF', 'OF', 'DH'];
 
 const ROSTER_SLOT_TEMPLATE = [
   { key: 'C', accepts: ['C'], isBench: false },
@@ -31,11 +31,11 @@ const ROSTER_SLOT_TEMPLATE = [
   { key: 'LF', accepts: ['LF', 'OF'], isBench: false },
   { key: 'CF', accepts: ['CF', 'OF'], isBench: false },
   { key: 'RF', accepts: ['RF', 'OF'], isBench: false },
-  { key: 'DH', accepts: ['DH'], isBench: false },
+  { key: 'DH1', accepts: HITTER_POSITION_ACCEPTS, isBench: false },
+  { key: 'DH2', accepts: HITTER_POSITION_ACCEPTS, isBench: false },
   { key: 'SP1', accepts: ['SP'], isBench: false },
   { key: 'SP2', accepts: ['SP'], isBench: false },
-  { key: 'RP', accepts: ['RP'], isBench: false },
-  { key: 'BN1', accepts: HITTER_BENCH_ACCEPTS, isBench: true }
+  { key: 'RP', accepts: ['RP'], isBench: false }
 ];
 
 const MAX_DRAFT_ROUNDS = ROSTER_SLOT_TEMPLATE.length;
@@ -153,6 +153,76 @@ async function getPositionCountMapForPicks(picks = []) {
 
 function buildRosterSlotState() {
   return ROSTER_SLOT_TEMPLATE.map((slot) => ({ ...slot, occupied: false }));
+}
+
+function canAssignPositionsToSlots(positions = [], slotTemplate = ROSTER_SLOT_TEMPLATE) {
+  const slots = (slotTemplate || []).filter((slot) => !slot.isBench);
+  if ((positions || []).length > slots.length) return false;
+
+  const normalizedPositions = (positions || [])
+    .map((position) => normalizePosition(position))
+    .filter(Boolean);
+
+  if (normalizedPositions.length !== (positions || []).length) return false;
+
+  // Build bipartite graph: positions -> slots they can fill
+  const slotByPosition = normalizedPositions.map((position) => {
+    const options = [];
+    for (let slotIdx = 0; slotIdx < slots.length; slotIdx++) {
+      if ((slots[slotIdx].accepts || []).includes(position)) {
+        options.push(slotIdx);
+      }
+    }
+    return options;
+  });
+
+  // Check if any position has no valid slots
+  for (const options of slotByPosition) {
+    if (options.length === 0) return false;
+  }
+
+  // Bipartite matching: Try to assign all positions to unique slots
+  const assignedSlotByPosition = new Array(normalizedPositions.length).fill(-1);
+
+  const tryMatch = (positionIdx) => {
+    for (const slotIdx of slotByPosition[positionIdx]) {
+      // Check if slot is free
+      if (assignedSlotByPosition.every((assigned, idx) => assigned !== slotIdx)) {
+        assignedSlotByPosition[positionIdx] = slotIdx;
+        return true;
+      }
+    }
+
+    // Try to reassign a position that's using one of our slots
+    for (const slotIdx of slotByPosition[positionIdx]) {
+      const conflictingPosition = assignedSlotByPosition.findIndex((assigned) => assigned === slotIdx);
+      if (conflictingPosition === -1) continue;
+
+      // Temporarily unassign the conflicting position
+      const savedSlot = assignedSlotByPosition[conflictingPosition];
+      assignedSlotByPosition[conflictingPosition] = -1;
+
+      // Try to reassign the conflicting position elsewhere
+      if (tryMatch(conflictingPosition)) {
+        assignedSlotByPosition[positionIdx] = slotIdx;
+        return true;
+      }
+
+      // Backtrack if reassignment failed
+      assignedSlotByPosition[conflictingPosition] = savedSlot;
+    }
+
+    return false;
+  };
+
+  // Try to match all positions
+  for (let positionIdx = 0; positionIdx < normalizedPositions.length; positionIdx++) {
+    if (!tryMatch(positionIdx)) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function occupySlotForPosition(slots, position) {
@@ -782,12 +852,11 @@ router.post('/my-team/pickup', async (req, res) => {
       }
     }
 
-    const rosterSlots = buildRosterSlotState();
     const existingPlayerIds = userDraftPicks
       .map((pick) => String(pick.playerId || '').trim())
       .filter(Boolean);
 
-    const positionCountByValue = new Map();
+    const existingPositions = [];
 
     if (existingPlayerIds.length > 0) {
       const existingPlayers = await Player.find({ _id: { $in: existingPlayerIds } }, { _id: 1, position: 1, stats: 1, statsBySeason: 1 }).lean();
@@ -796,18 +865,14 @@ router.post('/my-team/pickup', async (req, res) => {
       for (const pick of userDraftPicks) {
         const pickPosition = positionByPlayerId.get(String(pick.playerId));
         if (!pickPosition) continue;
-
-        const occupiedSlot = occupySlotForPosition(rosterSlots, pickPosition);
-        if (!occupiedSlot) {
-          return res.status(400).json({ message: 'Your roster is already full for available lineup slots' });
-        }
+        existingPositions.push(pickPosition);
       }
     }
 
     const requestedPosition = resolveRosterPosition(player);
 
-    const availableSlotForRequestedPosition = occupySlotForPosition(rosterSlots, requestedPosition);
-    if (!availableSlotForRequestedPosition) {
+    const canFitPickup = canAssignPositionsToSlots([...existingPositions, requestedPosition]);
+    if (!canFitPickup) {
       return res.status(400).json({ message: `No available lineup slot for position ${requestedPosition || 'N/A'}` });
     }
 
@@ -1032,10 +1097,15 @@ router.post('/roster/swap', async (req, res) => {
       activeContext.positionByPlayerId.get(String(activePlayerId)) || ''
     );
 
-    const isCompatibleSwap = normalizedActivePosition === normalizedBenchPosition;
+    const activeRosterSlotDef = ROSTER_SLOT_TEMPLATE.find((slot) => String(slot.key) === String(activeSlotKey));
+    const isDhSlot = !!activeRosterSlotDef && !activeRosterSlotDef.isBench && String(activeRosterSlotDef.key).startsWith('DH');
+    const isBenchHitter = !!normalizedBenchPosition && normalizedBenchPosition !== 'SP' && normalizedBenchPosition !== 'RP' && normalizedBenchPosition !== 'P';
+
+    const isCompatibleSwap = normalizedActivePosition === normalizedBenchPosition
+      || (isDhSlot && isBenchHitter);
 
     if (!isCompatibleSwap) {
-      return res.status(400).json({ message: 'Swap requires the same roster position' });
+      return res.status(400).json({ message: 'Swap requires a compatible roster position' });
     }
 
     if (String(benchDraft._id) === String(activeDraft._id)) {
@@ -1077,9 +1147,25 @@ router.delete('/my-team/:playerId', async (req, res) => {
     if (!user) return res.status(401).json({ message: 'Not logged in' });
 
     const playerId = String(req.params.playerId || '').trim();
+    const groupId = String(req.query?.groupId || req.body?.groupId || '').trim();
     if (!playerId) return res.status(400).json({ message: 'playerId is required' });
+    if (!groupId) return res.status(400).json({ message: 'groupId is required' });
+
+    const group = await Group.findById(groupId);
+    if (!group) return res.status(404).json({ message: 'Group not found' });
+
+    const groupMember = (group.members || []).find((member) => member.userId === user.userId);
+    if (!groupMember) {
+      return res.status(403).json({ message: 'You must be in this group to drop a player' });
+    }
+
+    const dropsUsed = Math.max(0, Number(groupMember.dropsUsed) || 0);
+    if (dropsUsed >= 1) {
+      return res.status(403).json({ message: 'You already used your one allowed drop for this group' });
+    }
 
     const drafts = await Draft.find({
+      groupId,
       'users.userId': user.userId,
       'users.picks.playerId': playerId
     });
@@ -1114,7 +1200,14 @@ router.delete('/my-team/:playerId', async (req, res) => {
       }
     }
 
-    const refreshedDrafts = await Draft.find({ 'users.userId': user.userId });
+    if (droppedCount <= 0) {
+      return res.status(404).json({ message: 'Player not found on your roster' });
+    }
+
+    groupMember.dropsUsed = 1;
+    await group.save();
+
+    const refreshedDrafts = await Draft.find({ groupId, 'users.userId': user.userId });
     const allPicks = [];
     for (const draft of refreshedDrafts) {
       const slot = draft.users.find((u) => u.userId === user.userId);
@@ -1126,7 +1219,9 @@ router.delete('/my-team/:playerId', async (req, res) => {
     res.json({
       message: `Dropped ${droppedCount} player pick${droppedCount === 1 ? '' : 's'}`,
       username: user.username,
-      picks: allPicks
+      picks: allPicks,
+      dropsUsed: 1,
+      dropsRemaining: 0
     });
   } catch (err) {
     console.error('[API] drop-player error:', err.message);
@@ -1393,7 +1488,7 @@ router.post('/:id/end', async (req, res) => {
         const rosterProgressState = await buildRosterProgressState(userPicks);
         if (!rosterProgressState.isComplete) {
           return res.status(400).json({
-            message: `Cannot end draft: ${user?.name || 'A team'} must fill all starting positions and 3 bench spots`
+            message: `Cannot end draft: ${user?.name || 'A team'} must fill all required roster positions`
           });
         }
       }

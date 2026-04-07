@@ -30,6 +30,8 @@ const groupSchema = new mongoose.Schema({
   members: [{
     userId: { type: String, required: true },
     username: { type: String, required: true },
+    accountUsername: { type: String, default: '' },
+    dropsUsed: { type: Number, default: 0, min: 0 },
     joinedAt: { type: Date, default: Date.now }
   }],
   draftOrderUserIds: {

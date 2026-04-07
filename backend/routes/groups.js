@@ -4,6 +4,7 @@ const jwt = require('jsonwebtoken');
 const Group = require('../models/Group');
 const Draft = require('../models/Draft');
 const Trade = require('../models/Trade');
+const User = require('../models/User');
 
 const JWT_SECRET = process.env.JWT_SECRET || 'baseball_app_secret_key';
 
@@ -91,6 +92,11 @@ router.get('/:id/teams', async (req, res) => {
     }
 
     const drafts = await Draft.find({ groupId: String(group._id) }).sort({ createdAt: -1 });
+    const memberIds = (group.members || []).map((member) => String(member.userId || '').trim()).filter(Boolean);
+    const users = memberIds.length > 0
+      ? await User.find({ _id: { $in: memberIds } }, { _id: 1, username: 1 }).lean()
+      : [];
+    const ownerUsernameById = new Map(users.map((entry) => [String(entry._id), String(entry.username || '').trim()]));
 
     const teams = group.members.map((member) => {
       const picks = [];
@@ -114,8 +120,13 @@ router.get('/:id/teams', async (req, res) => {
       return {
         userId: member.userId,
         username: member.username,
+        ownerUsername: String(member.accountUsername || '').trim()
+          || ownerUsernameById.get(String(member.userId || ''))
+          || 'Unknown',
         picks,
-        benchPlayerIds
+        benchPlayerIds,
+        dropsUsed: Math.max(0, Number(member.dropsUsed) || 0),
+        dropsRemaining: Math.max(0, 1 - (Math.max(0, Number(member.dropsUsed) || 0)))
       };
     });
 
@@ -160,7 +171,7 @@ router.post('/', async (req, res) => {
       inviteCode,
       draftScheduledAt: parsedDraftSchedule.value,
       preferredDraftType: parsedDraftType.value,
-      members: [{ userId: user.userId, username: user.username }],
+      members: [{ userId: user.userId, username: user.username, accountUsername: user.username, dropsUsed: 0 }],
       draftOrderUserIds: [user.userId]
     });
 
@@ -212,7 +223,7 @@ router.post('/join', async (req, res) => {
 
     const alreadyInGroup = group.members.some((m) => m.userId === user.userId);
     if (!alreadyInGroup) {
-      group.members.push({ userId: user.userId, username: user.username });
+      group.members.push({ userId: user.userId, username: user.username, accountUsername: user.username, dropsUsed: 0 });
       if (!Array.isArray(group.draftOrderUserIds)) {
         group.draftOrderUserIds = [];
       }
@@ -314,6 +325,9 @@ router.put('/:id/team-name', async (req, res) => {
       return res.status(403).json({ message: 'You must be in this group to update a team name' });
     }
 
+    if (!String(member.accountUsername || '').trim()) {
+      member.accountUsername = user.username;
+    }
     member.username = teamName;
     await group.save();
 
