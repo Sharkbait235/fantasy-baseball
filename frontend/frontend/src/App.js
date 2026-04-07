@@ -855,9 +855,20 @@ function App() {
       return;
     }
 
-    if (!hasOpenSlotForPosition(player)) {
-      const normalizedPosition = resolveRosterPosition(player) || 'N/A';
-      alert(`No available lineup slot for position ${normalizedPosition}`);
+    const normalizedPosition = resolveRosterPosition(player) || 'N/A';
+    const canFitPlayer = hasOpenSlotForPosition(player);
+    
+    console.log('[PICKUP DEBUG]', {
+      playerName: player.name,
+      playerPosition: player.position,
+      normalizedPosition,
+      canFitPlayer,
+      myTeamPicks: myTeam.picks.map(p => ({ name: p.playerName, position: p.position })),
+      rosterSlots: myTeamRoster.slots.filter(s => !s.isBench).map(s => ({ key: s.key, player: s.player?.name || 'EMPTY', position: s.player?.position }))
+    });
+
+    if (!canFitPlayer) {
+      alert(`No available lineup slot for position ${normalizedPosition}. Try swapping a player or check console for details.`);
       return;
     }
 
@@ -1246,6 +1257,7 @@ function App() {
     const allPositions = [...currentPositions, normalizedPosition];
     if (allPositions.length > activeSlotTemplate.length) return false;
 
+    // Build bipartite graph: positions -> slots they can fill
     const slotOptionsByPosition = allPositions.map((position) => {
       const options = [];
       for (let slotIdx = 0; slotIdx < activeSlotTemplate.length; slotIdx++) {
@@ -1256,25 +1268,48 @@ function App() {
       return options;
     });
 
-    const assignedPositionBySlot = new Array(activeSlotTemplate.length).fill(-1);
+    // Check if any position has no valid slots
+    for (const options of slotOptionsByPosition) {
+      if (options.length === 0) return false;
+    }
 
-    const tryAssign = (positionIdx, seenSlots) => {
+    // Bipartite matching: Try to assign all positions to unique slots
+    const assignedSlotByPosition = new Array(allPositions.length).fill(-1);
+
+    const tryMatch = (positionIdx) => {
       for (const slotIdx of slotOptionsByPosition[positionIdx]) {
-        if (seenSlots[slotIdx]) continue;
-        seenSlots[slotIdx] = true;
-
-        if (assignedPositionBySlot[slotIdx] === -1 || tryAssign(assignedPositionBySlot[slotIdx], seenSlots)) {
-          assignedPositionBySlot[slotIdx] = positionIdx;
+        // Check if slot is free
+        if (assignedSlotByPosition.every((assigned, idx) => assigned !== slotIdx)) {
+          assignedSlotByPosition[positionIdx] = slotIdx;
           return true;
         }
       }
+
+      // Try to reassign a position that's using one of our slots
+      for (const slotIdx of slotOptionsByPosition[positionIdx]) {
+        const conflictingPosition = assignedSlotByPosition.findIndex((assigned) => assigned === slotIdx);
+        if (conflictingPosition === -1) continue;
+
+        // Temporarily unassign the conflicting position
+        const savedSlot = assignedSlotByPosition[conflictingPosition];
+        assignedSlotByPosition[conflictingPosition] = -1;
+
+        // Try to reassign the conflicting position elsewhere
+        if (tryMatch(conflictingPosition)) {
+          assignedSlotByPosition[positionIdx] = slotIdx;
+          return true;
+        }
+
+        // Backtrack if reassignment failed
+        assignedSlotByPosition[conflictingPosition] = savedSlot;
+      }
+
       return false;
     };
 
-    for (let positionIdx = 0; positionIdx < slotOptionsByPosition.length; positionIdx++) {
-      if (slotOptionsByPosition[positionIdx].length === 0) return false;
-      const seenSlots = new Array(activeSlotTemplate.length).fill(false);
-      if (!tryAssign(positionIdx, seenSlots)) {
+    // Try to match all positions
+    for (let positionIdx = 0; positionIdx < allPositions.length; positionIdx++) {
+      if (!tryMatch(positionIdx)) {
         return false;
       }
     }
